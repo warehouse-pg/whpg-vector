@@ -60,13 +60,13 @@ HnswInit(void)
 	hnsw_relopt_kind = add_reloption_kind();
 	add_int_reloption(hnsw_relopt_kind, "m", "Max number of connections",
 					  HNSW_DEFAULT_M, HNSW_MIN_M, HNSW_MAX_M
-#if PG_VERSION_NUM >= 130000
+#if PG_VERSION_NUM >= 120012
 					  ,AccessExclusiveLock
 #endif
 		);
 	add_int_reloption(hnsw_relopt_kind, "ef_construction", "Size of the dynamic candidate list for construction",
 					  HNSW_DEFAULT_EF_CONSTRUCTION, HNSW_MIN_EF_CONSTRUCTION, HNSW_MAX_EF_CONSTRUCTION
-#if PG_VERSION_NUM >= 130000
+#if PG_VERSION_NUM >= 120012
 					  ,AccessExclusiveLock
 #endif
 		);

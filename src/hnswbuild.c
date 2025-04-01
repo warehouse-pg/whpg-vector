@@ -60,7 +60,7 @@
 #include "pgstat.h"
 #endif
 
-#if PG_VERSION_NUM >= 130000
+#if PG_VERSION_NUM >= 120012
 #define CALLBACK_ITEM_POINTER ItemPointer tid
 #else
 #define CALLBACK_ITEM_POINTER HeapTuple hup
@@ -590,7 +590,7 @@ BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values,
 	HnswGraph  *graph = buildstate->graph;
 	MemoryContext oldCtx;
 
-#if PG_VERSION_NUM < 130000
+#if PG_VERSION_NUM < 120012
 	ItemPointer tid = &hup->t_self;
 #endif
 
@@ -1059,8 +1059,12 @@ ComputeParallelWorkers(Relation heap, Relation index)
 {
 	int			parallel_workers;
 
+#if PG_VERSION_NUM > 120012
 	/* Make sure it's safe to use parallel workers */
 	parallel_workers = plan_create_index_workers(RelationGetRelid(heap), RelationGetRelid(index));
+#else
+	parallel_workers = 0;
+#endif
 	if (parallel_workers == 0)
 		return 0;
 

@@ -27,7 +27,7 @@ IvfflatInit(void)
 	ivfflat_relopt_kind = add_reloption_kind();
 	add_int_reloption(ivfflat_relopt_kind, "lists", "Number of inverted lists",
 					  IVFFLAT_DEFAULT_LISTS, IVFFLAT_MIN_LISTS, IVFFLAT_MAX_LISTS
-#if PG_VERSION_NUM >= 130000
+#if PG_VERSION_NUM >= 120012
 					  ,AccessExclusiveLock
 #endif
 		);

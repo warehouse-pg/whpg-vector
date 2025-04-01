@@ -9,7 +9,8 @@ HEADERS = src/halfvec.h src/sparsevec.h src/vector.h
 
 TESTS = $(wildcard test/sql/*.sql)
 REGRESS = $(patsubst test/sql/%.sql,%,$(TESTS))
-REGRESS_OPTS = --inputdir=test --load-extension=$(EXTENSION)
+INIT_FILE_PATH = test/init_file
+REGRESS_OPTS = --inputdir=test --load-extension=$(EXTENSION) --init-file=${INIT_FILE_PATH}
 
 # To compile for portability, run: make OPTFLAGS=""
 OPTFLAGS = -march=native

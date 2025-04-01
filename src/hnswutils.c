@@ -14,7 +14,7 @@
 #include "utils/memdebug.h"
 #include "utils/rel.h"
 
-#if PG_VERSION_NUM >= 130000
+#if PG_VERSION_NUM >= 120012
 #include "common/hashfn.h"
 #else
 #include "utils/hashutils.h"

@@ -26,7 +26,7 @@
 #include "pgstat.h"
 #endif
 
-#if PG_VERSION_NUM >= 130000
+#if PG_VERSION_NUM >= 120012
 #define CALLBACK_ITEM_POINTER ItemPointer tid
 #else
 #define CALLBACK_ITEM_POINTER HeapTuple hup
@@ -213,7 +213,7 @@ BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values,
 	IvfflatBuildState *buildstate = (IvfflatBuildState *) state;
 	MemoryContext oldCtx;
 
-#if PG_VERSION_NUM < 130000
+#if PG_VERSION_NUM < 120012
 	ItemPointer tid = &hup->t_self;
 #endif
 
@@ -932,9 +932,11 @@ AssignTuples(IvfflatBuildState * buildstate)
 
 	pgstat_progress_update_param(PROGRESS_CREATEIDX_SUBPHASE, PROGRESS_IVFFLAT_PHASE_ASSIGN);
 
+#if PG_VERSION_NUM > 120012
 	/* Calculate parallel workers */
 	if (buildstate->heap != NULL)
 		parallel_workers = plan_create_index_workers(RelationGetRelid(buildstate->heap), RelationGetRelid(buildstate->index));
+#endif
 
 	/* Attempt to launch parallel worker scan when required */
 	if (parallel_workers > 0)
