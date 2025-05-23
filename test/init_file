@@ -10,6 +10,9 @@ m/^DETAIL:  This will cause low recall./
 m/^HINT:  Drop the index until the table has more data./
 m/^NOTICE:  ivfflat index created with little data/
 
+m/^NOTICE:  One or more columns in the following table\(s\) do not have statistics: .*/
+m/^HINT:  For non-partitioned tables, run analyze .* See log for columns missing statistics\./
+
 -- end_matchignore
 
 -- start_matchsubs
