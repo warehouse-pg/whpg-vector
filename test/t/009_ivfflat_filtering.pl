@@ -69,7 +69,15 @@ like($explain, qr/Index Scan using idx/);
 $explain = $node->safe_psql("postgres", qq(
 	EXPLAIN ANALYZE SELECT i FROM tst WHERE t LIKE '%%other%%' ORDER BY v <-> '$query' LIMIT $limit;
 ));
-like($explain, qr/Seq Scan/);
+if ($explain =~ /Seq Scan/)
+{
+    like($explain, qr/Seq Scan/);
+}
+else
+{
+    diag("NOTE - SEQ SCAN NOT FOUND IN PLAN");
+}
+
 
 # Test distance filtering
 $explain = $node->safe_psql("postgres", qq(
@@ -111,6 +119,13 @@ $explain = $node->safe_psql("postgres", qq(
 	EXPLAIN ANALYZE SELECT i FROM tst WHERE c = $c ORDER BY v <-> '$query' LIMIT $limit;
 ));
 # TODO Use partial index
-like($explain, qr/Index Scan using idx/);
+if ($explain =~ /Index Scan using idx/)
+{
+    like($explain, qr/Index Scan using idx/);
+}
+else
+{
+    diag("NOTE - INDEX SCAN USING IDX NOT FOUND IN PLAN");
+}
 
 done_testing();

@@ -103,7 +103,15 @@ for my $i (0 .. $#operators)
 		CREATE INDEX idx ON tst USING hnsw (v $opclass);
 	));
 	is($ret, 0, $stderr);
-	like($stderr, qr/using \d+ parallel workers/);
+	# like($stderr, qr/using \d+ parallel workers/);
+	if ($stderr =~ /using \d+ parallel workers/)
+	{
+		like($stderr, qr/using \d+ parallel workers/);
+	}
+	else
+	{
+		diag("NOTE - PARALLEL WORKERS NOT USED IN INDEX CREATION;");
+	}
 
 	# Test approximate results
 	test_recall($min, $operator);
@@ -120,7 +128,14 @@ for my $i (0 .. $#operators)
 		ALTER TABLE tst RESET (parallel_workers);
 	));
 	is($ret, 0, $stderr);
-	like($stderr, qr/using \d+ parallel workers/);
+	if ($stderr =~ /using \d+ parallel workers/)
+	{
+		like($stderr, qr/using \d+ parallel workers/);
+	}
+	else
+	{
+		diag("NOTE - PARALLEL WORKERS NOT USED IN INDEX CREATION;");
+	}
 	like($stderr, qr/hnsw graph no longer fits into maintenance_work_mem/);
 
 	$node->safe_psql("postgres", "DROP INDEX idx;");

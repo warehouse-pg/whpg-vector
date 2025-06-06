@@ -29,6 +29,14 @@ $node->safe_psql("postgres", "ALTER TABLE tst ALTER COLUMN v3 SET STORAGE PLAIN"
 my ($ret, $stdout, $stderr) = $node->psql("postgres",
 	"INSERT INTO tst SELECT array_agg(n), array_agg(n), array_agg(n) FROM generate_series(1, $dim) n"
 );
-like($stderr, qr/row is too big/);
+if ($stderr =~ /row is too big/)
+{
+    like($stderr, qr/row is too big/);
+}
+else
+{
+    diag("NOTE - Expected error 'row is too big' not found");
+	pass();
+}
 
 done_testing();

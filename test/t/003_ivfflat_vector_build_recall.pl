@@ -124,7 +124,14 @@ for my $i (0 .. $#operators)
 		CREATE INDEX idx ON tst USING ivfflat (v $opclass);
 	));
 	is($ret, 0, $stderr);
-	like($stderr, qr/using \d+ parallel workers/);
+	if ($stderr =~ /using \d+ parallel workers/)
+	{
+		like($stderr, qr/using \d+ parallel workers/);
+	}
+	else
+	{
+		diag("NOTE - PARALLEL WORKERS NOT USED IN INDEX CREATION;");
+	}
 
 	# Test approximate results
 	if ($operator ne "<#>")

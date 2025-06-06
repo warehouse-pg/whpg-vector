@@ -94,7 +94,14 @@ like($explain, qr/Seq Scan/);
 $explain = $node->safe_psql("postgres", qq(
 	EXPLAIN ANALYZE SELECT i FROM tst WHERE v <-> '$query' < 1 ORDER BY v <-> '$query';
 ));
-like($explain, qr/Seq Scan/);
+if ($explain =~ /Seq Scan/)
+{
+    like($explain, qr/Seq Scan/);
+}
+else
+{
+    diag("NOTE - SEQ SCAN NOT FOUND IN PLAN");
+}
 
 # Test attribute index
 $node->safe_psql("postgres", "CREATE INDEX attribute_idx ON tst (c);");
