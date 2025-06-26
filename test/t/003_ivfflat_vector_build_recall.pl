@@ -124,7 +124,8 @@ for my $i (0 .. $#operators)
 		CREATE INDEX idx ON tst USING ivfflat (v $opclass);
 	));
 	is($ret, 0, $stderr);
-	like($stderr, qr/using \d+ parallel workers/);
+	# WarehousePG does not support parallel index creation yet
+	# like($stderr, qr/using \d+ parallel workers/);
 
 	# Test approximate results
 	if ($operator ne "<#>")

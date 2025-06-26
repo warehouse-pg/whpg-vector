@@ -40,7 +40,11 @@ sub test_aggregate
 
 	# Test explain
 	my $explain = $node->safe_psql("postgres", "EXPLAIN SELECT $agg(v) FROM tst;");
-	like($explain, qr/Partial Aggregate/);
+	# PostgreSQL uses Partial Aggregate for parallel execution,
+	# WarehousePG does not support parallel execution yet,
+	# TAP test framework connects to one segment to run queries,
+	# so there is no Partial Aggregate in the plan.
+	# like($explain, qr/Partial Aggregate/);
 
 	# Test halfvec
 	$res = $node->safe_psql("postgres", "SELECT $agg(v::halfvec) FROM tst;");
@@ -53,7 +57,11 @@ sub test_aggregate
 	else
 	{
 		# Does not raise overflow error in this instance due to loss of precision
-		is($res, "[24576,24576,49152]");
+
+		# TAP test framework connects to one segment to run queries,
+		# so result is not gathered on coordinator. 
+		# is($res, "[24576,24576,49152]")
+		is($res, "[8192,8192,16384]");
 	}
 }
 
