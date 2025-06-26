@@ -94,14 +94,9 @@ like($explain, qr/Seq Scan/);
 $explain = $node->safe_psql("postgres", qq(
 	EXPLAIN ANALYZE SELECT i FROM tst WHERE v <-> '$query' < 1 ORDER BY v <-> '$query';
 ));
-if ($explain =~ /Seq Scan/)
-{
-    like($explain, qr/Seq Scan/);
-}
-else
-{
-    diag("NOTE - SEQ SCAN NOT FOUND IN PLAN");
-}
+# For WarehousePG, each segment has a portion of inserted rows,
+# the planner chooses to use the index scan
+# like($explain, qr/Seg Scan/);
 
 # Test attribute index
 $node->safe_psql("postgres", "CREATE INDEX attribute_idx ON tst (c);");

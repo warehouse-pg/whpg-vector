@@ -69,15 +69,9 @@ like($explain, qr/Index Scan using idx/);
 $explain = $node->safe_psql("postgres", qq(
 	EXPLAIN ANALYZE SELECT i FROM tst WHERE t LIKE '%%other%%' ORDER BY v <-> '$query' LIMIT $limit;
 ));
-if ($explain =~ /Seq Scan/)
-{
-    like($explain, qr/Seq Scan/);
-}
-else
-{
-    diag("NOTE - SEQ SCAN NOT FOUND IN PLAN");
-}
-
+# For WarehousePG, each segment has a portion of inserted rows,
+# the planner chooses to use the index scan
+# like($explain, qr/Seq Scan/);
 
 # Test distance filtering
 $explain = $node->safe_psql("postgres", qq(
@@ -119,13 +113,8 @@ $explain = $node->safe_psql("postgres", qq(
 	EXPLAIN ANALYZE SELECT i FROM tst WHERE c = $c ORDER BY v <-> '$query' LIMIT $limit;
 ));
 # TODO Use partial index
-if ($explain =~ /Index Scan using idx/)
-{
-    like($explain, qr/Index Scan using idx/);
-}
-else
-{
-    diag("NOTE - INDEX SCAN USING IDX NOT FOUND IN PLAN");
-}
+# The result of WarehousePG is different from PostgreSQL,
+# it uses partial_idx for the query
+like($explain, qr/Index Scan using partial_idx/);
 
 done_testing();

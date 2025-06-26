@@ -4,7 +4,9 @@ use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
 
-my $dim = 1024;
+# WarehousePG's default block size is 32K bytes,
+# so the dim should be 4 times of 1024 to get 'row is too big' error
+my $dim = 4096;
 
 # Initialize node
 my $node = PostgreSQL::Test::Cluster->new('node');
@@ -13,7 +15,7 @@ $node->start;
 
 # Create table
 $node->safe_psql("postgres", "CREATE EXTENSION vector;");
-$node->safe_psql("postgres", "CREATE TABLE tst (v1 vector(1024), v2 vector(1024), v3 vector(1024));");
+$node->safe_psql("postgres", "CREATE TABLE tst (v1 vector($dim), v2 vector($dim), v3 vector($dim));");
 
 # Test insert succeeds
 $node->safe_psql("postgres",
@@ -29,14 +31,6 @@ $node->safe_psql("postgres", "ALTER TABLE tst ALTER COLUMN v3 SET STORAGE PLAIN"
 my ($ret, $stdout, $stderr) = $node->psql("postgres",
 	"INSERT INTO tst SELECT array_agg(n), array_agg(n), array_agg(n) FROM generate_series(1, $dim) n"
 );
-if ($stderr =~ /row is too big/)
-{
-    like($stderr, qr/row is too big/);
-}
-else
-{
-    diag("NOTE - Expected error 'row is too big' not found");
-	pass();
-}
+like($stderr, qr/row is too big/);
 
 done_testing();
