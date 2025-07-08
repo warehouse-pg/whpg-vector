@@ -7,6 +7,7 @@
 #include "commands/progress.h"
 #include "commands/vacuum.h"
 #include "ivfflat.h"
+#include "utils/float.h"
 #include "utils/guc.h"
 #include "utils/selfuncs.h"
 #include "utils/spccache.h"
@@ -16,7 +17,15 @@
 #endif
 
 int			ivfflat_probes;
+int			ivfflat_iterative_scan;
+int			ivfflat_max_probes;
 static relopt_kind ivfflat_relopt_kind;
+
+static const struct config_enum_entry ivfflat_iterative_scan_options[] = {
+	{"off", IVFFLAT_ITERATIVE_SCAN_OFF, false},
+	{"relaxed_order", IVFFLAT_ITERATIVE_SCAN_RELAXED, false},
+	{NULL, 0, false}
+};
 
 /*
  * Initialize index options and variables
@@ -26,15 +35,20 @@ IvfflatInit(void)
 {
 	ivfflat_relopt_kind = add_reloption_kind();
 	add_int_reloption(ivfflat_relopt_kind, "lists", "Number of inverted lists",
-					  IVFFLAT_DEFAULT_LISTS, IVFFLAT_MIN_LISTS, IVFFLAT_MAX_LISTS
-#if PG_VERSION_NUM >= 120012
-					  ,AccessExclusiveLock
-#endif
-		);
+					  IVFFLAT_DEFAULT_LISTS, IVFFLAT_MIN_LISTS, IVFFLAT_MAX_LISTS, AccessExclusiveLock);
 
 	DefineCustomIntVariable("ivfflat.probes", "Sets the number of probes",
 							"Valid range is 1..lists.", &ivfflat_probes,
 							IVFFLAT_DEFAULT_PROBES, IVFFLAT_MIN_LISTS, IVFFLAT_MAX_LISTS, PGC_USERSET, 0, NULL, NULL, NULL);
+
+	DefineCustomEnumVariable("ivfflat.iterative_scan", "Sets the mode for iterative scans",
+							 NULL, &ivfflat_iterative_scan,
+							 IVFFLAT_ITERATIVE_SCAN_OFF, ivfflat_iterative_scan_options, PGC_USERSET, 0, NULL, NULL, NULL);
+
+	/* If this is less than probes, probes is used */
+	DefineCustomIntVariable("ivfflat.max_probes", "Sets the max number of probes for iterative scans",
+							NULL, &ivfflat_max_probes,
+							IVFFLAT_MAX_LISTS, IVFFLAT_MIN_LISTS, IVFFLAT_MAX_LISTS, PGC_USERSET, 0, NULL, NULL, NULL);
 
 	MarkGUCPrefixReserved("ivfflat");
 }
@@ -72,21 +86,29 @@ ivfflatcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 	GenericCosts costs;
 	int			lists;
 	double		ratio;
+	double		sequentialRatio = 0.5;
+	double		startupPages;
 	double		spc_seq_page_cost;
 	Relation	index;
 
 	/* Never use index without order */
 	if (path->indexorderbys == NULL)
 	{
-		*indexStartupCost = DBL_MAX;
-		*indexTotalCost = DBL_MAX;
+		*indexStartupCost = get_float8_infinity();
+		*indexTotalCost = get_float8_infinity();
 		*indexSelectivity = 0;
 		*indexCorrelation = 0;
 		*indexPages = 0;
+#if PG_VERSION_NUM >= 180000
+		/* See "On disable_cost" thread on pgsql-hackers */
+		path->path.disabled_nodes = 2;
+#endif
 		return;
 	}
 
 	MemSet(&costs, 0, sizeof(costs));
+
+	genericcostestimate(root, path, loop_count, &costs);
 
 	index = index_open(path->indexinfo->indexoid, NoLock);
 	IvfflatGetMetaPageInfo(index, &lists, NULL);
@@ -97,41 +119,26 @@ ivfflatcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 	if (ratio > 1.0)
 		ratio = 1.0;
 
-	/*
-	 * This gives us the subset of tuples to visit. This value is passed into
-	 * the generic cost estimator to determine the number of pages to visit
-	 * during the index scan.
-	 */
-	costs.numIndexTuples = path->indexinfo->tuples * ratio;
-
-	genericcostestimate(root, path, loop_count, &costs);
-
 	get_tablespace_page_costs(path->indexinfo->reltablespace, NULL, &spc_seq_page_cost);
 
+	/* Change some page cost from random to sequential */
+	costs.indexTotalCost -= sequentialRatio * costs.numIndexPages * (costs.spc_random_page_cost - spc_seq_page_cost);
+
+	/* Startup cost is cost before returning the first row */
+	costs.indexStartupCost = costs.indexTotalCost * ratio;
+
 	/* Adjust cost if needed since TOAST not included in seq scan cost */
-	if (costs.numIndexPages > path->indexinfo->rel->pages && ratio < 0.5)
+	startupPages = costs.numIndexPages * ratio;
+	if (startupPages > path->indexinfo->rel->pages && ratio < 0.5)
 	{
-		/* Change all page cost from random to sequential */
-		costs.indexTotalCost -= costs.numIndexPages * (costs.spc_random_page_cost - spc_seq_page_cost);
+		/* Change rest of page cost from random to sequential */
+		costs.indexStartupCost -= (1 - sequentialRatio) * startupPages * (costs.spc_random_page_cost - spc_seq_page_cost);
 
 		/* Remove cost of extra pages */
-		costs.indexTotalCost -= (costs.numIndexPages - path->indexinfo->rel->pages) * spc_seq_page_cost;
-	}
-	else
-	{
-		/* Change some page cost from random to sequential */
-		costs.indexTotalCost -= 0.5 * costs.numIndexPages * (costs.spc_random_page_cost - spc_seq_page_cost);
+		costs.indexStartupCost -= (startupPages - path->indexinfo->rel->pages) * spc_seq_page_cost;
 	}
 
-	/*
-	 * If the list selectivity is lower than what is returned from the generic
-	 * cost estimator, use that.
-	 */
-	if (ratio < costs.indexSelectivity)
-		costs.indexSelectivity = ratio;
-
-	/* Use total cost since most work happens before first tuple is returned */
-	*indexStartupCost = costs.indexTotalCost;
+	*indexStartupCost = costs.indexStartupCost;
 	*indexTotalCost = costs.indexTotalCost;
 	*indexSelectivity = costs.indexSelectivity;
 	*indexCorrelation = costs.indexCorrelation;
@@ -147,7 +154,6 @@ ivfflatoptions(Datum reloptions, bool validate)
 	static const relopt_parse_elt tab[] = {
 		{"lists", RELOPT_TYPE_INT, offsetof(IvfflatOptions, lists)},
 	};
-
 #if PG_VERSION_NUM >= 130000
 	return (bytea *) build_reloptions(reloptions, validate,
 									  ivfflat_relopt_kind,
@@ -204,9 +210,17 @@ ivfflathandler(PG_FUNCTION_ARGS)
 	amroutine->amclusterable = false;
 	amroutine->ampredlocks = false;
 	amroutine->amcanparallel = false;
+#if PG_VERSION_NUM >= 170000
+	amroutine->amcanbuildparallel = true;
+#endif
 	amroutine->amcaninclude = false;
-#if PG_VERSION_NUM >= 130000
+#if PG_VERSION_NUM >= 130000	
 	amroutine->amusemaintenanceworkmem = false; /* not used during VACUUM */
+#endif
+#if PG_VERSION_NUM >= 160000
+	amroutine->amsummarizing = false;
+#endif
+#if PG_VERSION_NUM >= 130000
 	amroutine->amparallelvacuumoptions = VACUUM_OPTION_PARALLEL_BULKDEL;
 #endif
 	amroutine->amkeytype = InvalidOid;
@@ -215,6 +229,9 @@ ivfflathandler(PG_FUNCTION_ARGS)
 	amroutine->ambuild = ivfflatbuild;
 	amroutine->ambuildempty = ivfflatbuildempty;
 	amroutine->aminsert = ivfflatinsert;
+#if PG_VERSION_NUM >= 170000
+	amroutine->aminsertcleanup = NULL;
+#endif
 	amroutine->ambulkdelete = ivfflatbulkdelete;
 	amroutine->amvacuumcleanup = ivfflatvacuumcleanup;
 	amroutine->amcanreturn = NULL;	/* tuple not included in heapsort */

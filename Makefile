@@ -1,5 +1,5 @@
 EXTENSION = vector
-EXTVERSION = 0.7.4
+EXTVERSION = 0.8.0
 
 MODULE_big = vector
 DATA = $(wildcard sql/*--*--*.sql)
@@ -67,7 +67,7 @@ dist:
 	git archive --format zip --prefix=$(EXTENSION)-$(EXTVERSION)/ --output dist/$(EXTENSION)-$(EXTVERSION).zip master
 
 # for Docker
-PG_MAJOR ?= 16
+PG_MAJOR ?= 17
 
 .PHONY: docker
 

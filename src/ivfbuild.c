@@ -26,12 +26,6 @@
 #include "pgstat.h"
 #endif
 
-#if PG_VERSION_NUM >= 120012
-#define CALLBACK_ITEM_POINTER ItemPointer tid
-#else
-#define CALLBACK_ITEM_POINTER HeapTuple hup
-#endif
-
 #if PG_VERSION_NUM >= 140000
 #include "utils/backend_status.h"
 #include "utils/wait_event.h"
@@ -96,7 +90,7 @@ AddSample(Datum *values, IvfflatBuildState * buildstate)
  * Callback for sampling
  */
 static void
-SampleCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values,
+SampleCallback(Relation index, ItemPointer tid, Datum *values,
 			   bool *isnull, bool tupleIsAlive, void *state)
 {
 	IvfflatBuildState *buildstate = (IvfflatBuildState *) state;
@@ -207,15 +201,11 @@ AddTupleToSort(Relation index, ItemPointer tid, Datum *values, IvfflatBuildState
  * Callback for table_index_build_scan
  */
 static void
-BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values,
+BuildCallback(Relation index, ItemPointer tid, Datum *values,
 			  bool *isnull, bool tupleIsAlive, void *state)
 {
 	IvfflatBuildState *buildstate = (IvfflatBuildState *) state;
 	MemoryContext oldCtx;
-
-#if PG_VERSION_NUM < 120012
-	ItemPointer tid = &hup->t_self;
-#endif
 
 	/* Skip nulls */
 	if (isnull[0])
@@ -238,11 +228,11 @@ BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values,
 static inline void
 GetNextTuple(Tuplesortstate *sortstate, TupleDesc tupdesc, TupleTableSlot *slot, IndexTuple *itup, int *list)
 {
-	Datum		value;
-	bool		isnull;
-
 	if (tuplesort_gettupleslot(sortstate, true, false, slot, NULL))
 	{
+		Datum		value;
+		bool		isnull;
+
 		*list = DatumGetInt32(slot_getattr(slot, 1, &isnull));
 		value = slot_getattr(slot, 3, &isnull);
 
@@ -264,8 +254,8 @@ InsertTuples(Relation index, IvfflatBuildState * buildstate, ForkNumber forkNum)
 	IndexTuple	itup = NULL;	/* silence compiler warning */
 	int64		inserted = 0;
 
-	TupleTableSlot *slot = MakeSingleTupleTableSlot(buildstate->tupdesc, &TTSOpsMinimalTuple);
-	TupleDesc	tupdesc = RelationGetDescr(index);
+	TupleTableSlot *slot = MakeSingleTupleTableSlot(buildstate->sortdesc, &TTSOpsMinimalTuple);
+	TupleDesc	tupdesc = buildstate->tupdesc;
 
 	pgstat_progress_update_param(PROGRESS_CREATEIDX_SUBPHASE, PROGRESS_IVFFLAT_PHASE_LOAD);
 
@@ -329,20 +319,27 @@ InitBuildState(IvfflatBuildState * buildstate, Relation heap, Relation index, In
 	buildstate->index = index;
 	buildstate->indexInfo = indexInfo;
 	buildstate->typeInfo = IvfflatGetTypeInfo(index);
+	buildstate->tupdesc = RelationGetDescr(index);
 
 	buildstate->lists = IvfflatGetLists(index);
 	buildstate->dimensions = TupleDescAttr(index->rd_att, 0)->atttypmod;
 
 	/* Disallow varbit since require fixed dimensions */
 	if (TupleDescAttr(index->rd_att, 0)->atttypid == VARBITOID)
-		elog(ERROR, "type not supported for ivfflat index");
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("type not supported for ivfflat index")));
 
 	/* Require column to have dimensions to be indexed */
 	if (buildstate->dimensions < 0)
-		elog(ERROR, "column does not have dimensions");
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("column does not have dimensions")));
 
 	if (buildstate->dimensions > buildstate->typeInfo->maxDimensions)
-		elog(ERROR, "column cannot have more than %d dimensions for ivfflat index", buildstate->typeInfo->maxDimensions);
+		ereport(ERROR,
+				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				 errmsg("column cannot have more than %d dimensions for ivfflat index", buildstate->typeInfo->maxDimensions)));
 
 	buildstate->reltuples = 0;
 	buildstate->indtuples = 0;
@@ -355,15 +352,17 @@ InitBuildState(IvfflatBuildState * buildstate, Relation heap, Relation index, In
 
 	/* Require more than one dimension for spherical k-means */
 	if (buildstate->kmeansnormprocinfo != NULL && buildstate->dimensions == 1)
-		elog(ERROR, "dimensions must be greater than one for this opclass");
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("dimensions must be greater than one for this opclass")));
 
 	/* Create tuple description for sorting */
-	buildstate->tupdesc = CreateTemplateTupleDesc(3);
-	TupleDescInitEntry(buildstate->tupdesc, (AttrNumber) 1, "list", INT4OID, -1, 0);
-	TupleDescInitEntry(buildstate->tupdesc, (AttrNumber) 2, "tid", TIDOID, -1, 0);
-	TupleDescInitEntry(buildstate->tupdesc, (AttrNumber) 3, "vector", RelationGetDescr(index)->attrs[0].atttypid, -1, 0);
+	buildstate->sortdesc = CreateTemplateTupleDesc(3);
+	TupleDescInitEntry(buildstate->sortdesc, (AttrNumber) 1, "list", INT4OID, -1, 0);
+	TupleDescInitEntry(buildstate->sortdesc, (AttrNumber) 2, "tid", TIDOID, -1, 0);
+	TupleDescInitEntry(buildstate->sortdesc, (AttrNumber) 3, "vector", buildstate->tupdesc->attrs[0].atttypid, -1, 0);
 
-	buildstate->slot = MakeSingleTupleTableSlot(buildstate->tupdesc, &TTSOpsVirtual);
+	buildstate->slot = MakeSingleTupleTableSlot(buildstate->sortdesc, &TTSOpsVirtual);
 
 	buildstate->centers = VectorArrayInit(buildstate->lists, buildstate->dimensions, buildstate->typeInfo->itemSize(buildstate->dimensions));
 	buildstate->listInfo = palloc(sizeof(ListInfo) * buildstate->lists);
@@ -563,6 +562,20 @@ PrintKmeansMetrics(IvfflatBuildState * buildstate)
 #endif
 
 /*
+ * Initialize build sort state
+ */
+static Tuplesortstate *
+InitBuildSortState(TupleDesc tupdesc, int memory, SortCoordinate coordinate)
+{
+	AttrNumber	attNums[] = {1};
+	Oid			sortOperators[] = {Int4LessOperator};
+	Oid			sortCollations[] = {InvalidOid};
+	bool		nullsFirstFlags[] = {false};
+
+	return tuplesort_begin_heap(tupdesc, 1, attNums, sortOperators, sortCollations, nullsFirstFlags, memory, coordinate, false);
+}
+
+/*
  * Within leader, wait for end of heap scan
  */
 static double
@@ -609,12 +622,6 @@ IvfflatParallelScanAndSort(IvfflatSpool * ivfspool, IvfflatShared * ivfshared, S
 	double		reltuples;
 	IndexInfo  *indexInfo;
 
-	/* Sort options, which must match AssignTuples */
-	AttrNumber	attNums[] = {1};
-	Oid			sortOperators[] = {Int4LessOperator};
-	Oid			sortCollations[] = {InvalidOid};
-	bool		nullsFirstFlags[] = {false};
-
 	/* Initialize local tuplesort coordination state */
 	coordinate = palloc0(sizeof(SortCoordinateData));
 	coordinate->isWorker = true;
@@ -627,7 +634,7 @@ IvfflatParallelScanAndSort(IvfflatSpool * ivfspool, IvfflatShared * ivfshared, S
 	InitBuildState(&buildstate, ivfspool->heap, ivfspool->index, indexInfo);
 	memcpy(buildstate.centers->items, ivfcenters, buildstate.centers->itemsize * buildstate.centers->maxlen);
 	buildstate.centers->length = buildstate.centers->maxlen;
-	ivfspool->sortstate = tuplesort_begin_heap(buildstate.tupdesc, 1, attNums, sortOperators, sortCollations, nullsFirstFlags, sortmem, coordinate, false);
+	ivfspool->sortstate = InitBuildSortState(buildstate.sortdesc, sortmem, coordinate);
 	buildstate.sortstate = ivfspool->sortstate;
 	scan = table_beginscan_parallel(ivfspool->heap,
 									ParallelTableScanFromIvfflatShared(ivfshared));
@@ -924,12 +931,6 @@ AssignTuples(IvfflatBuildState * buildstate)
 	int			parallel_workers = 0;
 	SortCoordinate coordinate = NULL;
 
-	/* Sort options, which must match IvfflatParallelScanAndSort */
-	AttrNumber	attNums[] = {1};
-	Oid			sortOperators[] = {Int4LessOperator};
-	Oid			sortCollations[] = {InvalidOid};
-	bool		nullsFirstFlags[] = {false};
-
 	pgstat_progress_update_param(PROGRESS_CREATEIDX_SUBPHASE, PROGRESS_IVFFLAT_PHASE_ASSIGN);
 
 #if PG_VERSION_NUM > 120012
@@ -952,7 +953,7 @@ AssignTuples(IvfflatBuildState * buildstate)
 	}
 
 	/* Begin serial/leader tuplesort */
-	buildstate->sortstate = tuplesort_begin_heap(buildstate->tupdesc, 1, attNums, sortOperators, sortCollations, nullsFirstFlags, maintenance_work_mem, coordinate, false);
+	buildstate->sortstate = InitBuildSortState(buildstate->sortdesc, maintenance_work_mem, coordinate);
 
 	/* Add tuples to sort */
 	if (buildstate->heap != NULL)
