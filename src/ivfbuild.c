@@ -19,6 +19,7 @@
 #include "tcop/tcopprot.h"
 #include "utils/memutils.h"
 #include "vector.h"
+#include "cdb/cdbvars.h"
 
 #if PG_VERSION_NUM >= 140000
 #include "utils/backend_progress.h"
@@ -932,9 +933,14 @@ AssignTuples(IvfflatBuildState * buildstate)
 
 	pgstat_progress_update_param(PROGRESS_CREATEIDX_SUBPHASE, PROGRESS_IVFFLAT_PHASE_ASSIGN);
 
-#if PG_VERSION_NUM > 120012
-	/* Calculate parallel workers */
-	if (buildstate->heap != NULL)
+#if PG_VERSION_NUM >= 120012
+	/*
+	 * Calculate parallel workers
+	 * Won't create parallel workers for AO tables
+	 */
+	if ((buildstate->heap != NULL) &&
+		(!RelationIsAppendOptimized(buildstate->heap)) &&
+		(Gp_role != GP_ROLE_UTILITY))
 		parallel_workers = plan_create_index_workers(RelationGetRelid(buildstate->heap), RelationGetRelid(buildstate->index));
 #endif
 

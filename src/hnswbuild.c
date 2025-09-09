@@ -53,6 +53,7 @@
 #include "tcop/tcopprot.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
+#include "cdb/cdbvars.h"
 
 #if PG_VERSION_NUM >= 140000
 #include "utils/backend_progress.h"
@@ -1057,9 +1058,9 @@ HnswBeginParallel(HnswBuildState * buildstate, bool isconcurrent, int request)
 static int
 ComputeParallelWorkers(Relation heap, Relation index)
 {
-	int			parallel_workers;
+	int			parallel_workers = 0;
 
-#if PG_VERSION_NUM > 120012
+#if PG_VERSION_NUM >= 120012
 	/* Make sure it's safe to use parallel workers */
 	parallel_workers = plan_create_index_workers(RelationGetRelid(heap), RelationGetRelid(index));
 #else
@@ -1086,8 +1087,13 @@ BuildGraph(HnswBuildState * buildstate, ForkNumber forkNum)
 
 	pgstat_progress_update_param(PROGRESS_CREATEIDX_SUBPHASE, PROGRESS_HNSW_PHASE_LOAD);
 
-	/* Calculate parallel workers */
-	if (buildstate->heap != NULL)
+	/*
+	 * Calculate parallel workers
+	 * Won't create parallel workers for AO tables
+	 */
+	if ((buildstate->heap != NULL) &&
+		(!RelationIsAppendOptimized(buildstate->heap)) &&
+		(Gp_role != GP_ROLE_UTILITY))
 		parallel_workers = ComputeParallelWorkers(buildstate->heap, buildstate->index);
 
 	/* Attempt to launch parallel worker scan when required */
