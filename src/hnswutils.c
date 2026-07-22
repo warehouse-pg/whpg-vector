@@ -14,6 +14,10 @@
 #include "utils/memdebug.h"
 #include "utils/rel.h"
 
+#if PG_VERSION_NUM >= 160000
+#include "varatt.h"
+#endif
+
 #if PG_VERSION_NUM >= 120012
 #include "common/hashfn.h"
 #else

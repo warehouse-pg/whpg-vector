@@ -40,12 +40,18 @@ HnswInitLockTranche(void)
 								  sizeof(int) * 1,
 								  &found);
 	if (!found)
+#if PG_VERSION_NUM >= 190000
+		tranche_ids[0] = LWLockNewTrancheId("HnswBuild");
+#else
 		tranche_ids[0] = LWLockNewTrancheId();
+#endif
 	hnsw_lock_tranche_id = tranche_ids[0];
 	LWLockRelease(AddinShmemInitLock);
 
+#if PG_VERSION_NUM < 190000
 	/* Per-backend registration of the tranche ID */
 	LWLockRegisterTranche(hnsw_lock_tranche_id, "HnswBuild");
+#endif
 }
 
 /*
@@ -117,6 +123,14 @@ hnswcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 		*indexSelectivity = 0;
 		*indexCorrelation = 0;
 		*indexPages = 0;
+#if PG_VERSION_NUM >= 180000
+		/* An astronomical cost is not enough as of PG18: a plain disabled
+		 * path (e.g. seqscan under enable_seqscan=off) now always beats a
+		 * non-disabled one on disabled_nodes first, cost second. Mark this
+		 * path disabled too so cost is what decides. See "On disable_cost"
+		 * pgsql-hackers thread. */
+		path->path.disabled_nodes = 2;
+#endif
 		return;
 	}
 

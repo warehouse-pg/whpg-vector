@@ -8,9 +8,19 @@
 #include "lib/pairingheap.h"
 #include "nodes/execnodes.h"
 #include "port.h"				/* for random() */
+#include "storage/bufpage.h"
+#include "storage/condition_variable.h"
+#include "storage/lwlock.h"
+#include "storage/s_lock.h"
 #include "utils/relptr.h"
 #include "utils/sampling.h"
 #include "vector.h"
+
+#if PG_VERSION_NUM >= 190000
+/* Item was removed from core in favor of a plain pointer; keep the alias so
+ * existing (Item) casts around PageAddItem/PageIndexTupleOverwrite still work */
+typedef void *Item;
+#endif
 
 #define HNSW_MAX_DIM 2000
 #define HNSW_MAX_NNZ 1000
@@ -125,7 +135,13 @@ typedef struct HnswNeighborArray HnswNeighborArray;
 HnswPtrDeclare(HnswElementData, HnswElementRelptr, HnswElementPtr);
 HnswPtrDeclare(HnswNeighborArray, HnswNeighborArrayRelptr, HnswNeighborArrayPtr);
 HnswPtrDeclare(HnswNeighborArrayPtr, HnswNeighborsRelptr, HnswNeighborsPtr);
+#if PG_VERSION_NUM >= 190000
+/* Pointer is void* as of PG19; match it so relptr_store()'s type-safety
+ * static assert (typeof-compatibility with DatumGetPointer()'s result) holds */
+HnswPtrDeclare(void, DatumRelptr, DatumPtr);
+#else
 HnswPtrDeclare(char, DatumRelptr, DatumPtr);
+#endif
 
 struct HnswElementData
 {
