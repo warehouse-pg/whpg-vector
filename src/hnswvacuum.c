@@ -8,6 +8,9 @@
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
 #include "utils/memutils.h"
+#include "varatt.h"
+
+#define vacuum_delay_point() vacuum_delay_point(false)
 
 /*
  * Check if deleted list contains an index TID

@@ -256,6 +256,10 @@ ivfflatbeginscan(Relation index, int nkeys, int norderbys)
 	so->tupdesc = CreateTemplateTupleDesc(2);
 	TupleDescInitEntry(so->tupdesc, (AttrNumber) 1, "distance", FLOAT8OID, -1, 0);
 	TupleDescInitEntry(so->tupdesc, (AttrNumber) 2, "heaptid", TIDOID, -1, 0);
+	/* Manually-built TupleDescs must be finalized before use as of PG19;
+	 * without it, firstNonCachedOffsetAttr/firstNonGuaranteedAttr are left
+	 * at their -1 sentinel and slot_deform_heap_tuple() segfaults */
+	TupleDescFinalize(so->tupdesc);
 
 	/* Prep sort */
 	so->sortstate = tuplesort_begin_heap(so->tupdesc, 1, attNums, sortOperators, sortCollations, nullsFirstFlags, work_mem, NULL, false);

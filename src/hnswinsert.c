@@ -8,6 +8,7 @@
 #include "storage/lmgr.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
+#include "varatt.h"
 
 /*
  * Get the insert page

@@ -54,6 +54,7 @@
 #include "utils/datum.h"
 #include "utils/memutils.h"
 #include "cdb/cdbvars.h"
+#include "varatt.h"
 
 #if PG_VERSION_NUM >= 140000
 #include "utils/backend_progress.h"
@@ -801,7 +802,8 @@ HnswParallelScanAndInsert(Relation heapRel, Relation indexRel, HnswShared * hnsw
 	buildstate.hnswarea = hnswarea;
 	InitAllocator(&buildstate.allocator, &HnswSharedMemoryAlloc, &buildstate);
 	scan = table_beginscan_parallel(heapRel,
-									ParallelTableScanFromHnswShared(hnswshared));
+									ParallelTableScanFromHnswShared(hnswshared),
+									SO_NONE);
 	reltuples = table_index_build_scan(heapRel, indexRel, indexInfo,
 									   true, progress, BuildCallback,
 									   (void *) &buildstate, scan);

@@ -13,6 +13,7 @@
 #include "utils/datum.h"
 #include "utils/memdebug.h"
 #include "utils/rel.h"
+#include "varatt.h"
 
 #if PG_VERSION_NUM >= 120012
 #include "common/hashfn.h"

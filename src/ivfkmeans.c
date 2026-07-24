@@ -12,6 +12,7 @@
 #include "utils/datum.h"
 #include "utils/memutils.h"
 #include "vector.h"
+#include "varatt.h"
 
 /*
  * Initialize with kmeans++

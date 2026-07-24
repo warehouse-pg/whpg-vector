@@ -5,6 +5,8 @@
 #include "ivfflat.h"
 #include "storage/bufmgr.h"
 
+#define vacuum_delay_point() vacuum_delay_point(false)
+
 /*
  * Bulk delete tuples from the index
  */

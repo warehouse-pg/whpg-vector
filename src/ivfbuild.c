@@ -20,6 +20,7 @@
 #include "utils/memutils.h"
 #include "vector.h"
 #include "cdb/cdbvars.h"
+#include "varatt.h"
 
 #if PG_VERSION_NUM >= 140000
 #include "utils/backend_progress.h"
@@ -362,7 +363,11 @@ InitBuildState(IvfflatBuildState * buildstate, Relation heap, Relation index, In
 	buildstate->tupdesc = CreateTemplateTupleDesc(3);
 	TupleDescInitEntry(buildstate->tupdesc, (AttrNumber) 1, "list", INT4OID, -1, 0);
 	TupleDescInitEntry(buildstate->tupdesc, (AttrNumber) 2, "tid", TIDOID, -1, 0);
-	TupleDescInitEntry(buildstate->tupdesc, (AttrNumber) 3, "vector", RelationGetDescr(index)->attrs[0].atttypid, -1, 0);
+	TupleDescInitEntry(buildstate->tupdesc, (AttrNumber) 3, "vector", TupleDescAttr(RelationGetDescr(index), 0)->atttypid, -1, 0);
+	/* Manually-built TupleDescs must be finalized before use as of PG19;
+	 * without it, firstNonCachedOffsetAttr/firstNonGuaranteedAttr are left
+	 * at their -1 sentinel and slot_deform_heap_tuple() segfaults */
+	TupleDescFinalize(buildstate->tupdesc);
 
 	buildstate->slot = MakeSingleTupleTableSlot(buildstate->tupdesc, &TTSOpsVirtual);
 
@@ -631,7 +636,8 @@ IvfflatParallelScanAndSort(IvfflatSpool * ivfspool, IvfflatShared * ivfshared, S
 	ivfspool->sortstate = tuplesort_begin_heap(buildstate.tupdesc, 1, attNums, sortOperators, sortCollations, nullsFirstFlags, sortmem, coordinate, false);
 	buildstate.sortstate = ivfspool->sortstate;
 	scan = table_beginscan_parallel(ivfspool->heap,
-									ParallelTableScanFromIvfflatShared(ivfshared));
+									ParallelTableScanFromIvfflatShared(ivfshared),
+									SO_NONE);
 	reltuples = table_index_build_scan(ivfspool->heap, ivfspool->index, indexInfo,
 									   true, progress, BuildCallback,
 									   (void *) &buildstate, scan);

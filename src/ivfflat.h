@@ -9,9 +9,18 @@
 #include "lib/pairingheap.h"
 #include "nodes/execnodes.h"
 #include "port.h"				/* for random() */
+#include "storage/bufpage.h"
+#include "storage/condition_variable.h"
+#include "storage/lwlock.h"
+#include "storage/s_lock.h"
 #include "utils/sampling.h"
 #include "utils/tuplesort.h"
 #include "vector.h"
+#include "varatt.h"
+
+/* Item was removed from core in favor of a plain pointer; keep the alias so
+ * existing (Item) casts around PageAddItem/PageIndexTupleOverwrite still work */
+typedef void *Item;
 
 #if PG_VERSION_NUM >= 150000
 #include "common/pg_prng.h"
