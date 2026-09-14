@@ -5,7 +5,9 @@
 #include "ivfflat.h"
 #include "storage/bufmgr.h"
 
+#if PG_VERSION_NUM >= 180000
 #define vacuum_delay_point() vacuum_delay_point(false)
+#endif
 
 /*
  * Bulk delete tuples from the index
@@ -28,7 +30,7 @@ ivfflatbulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 		Page		cpage;
 		OffsetNumber coffno;
 		OffsetNumber cmaxoffno;
-		BlockNumber startPages[MaxOffsetNumber];
+		BlockNumber listPages[MaxOffsetNumber];
 		ListInfo	listInfo;
 
 		cbuf = ReadBuffer(index, blkno);
@@ -42,7 +44,7 @@ ivfflatbulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 		{
 			IvfflatList list = (IvfflatList) PageGetItem(cpage, PageGetItemId(cpage, coffno));
 
-			startPages[coffno - FirstOffsetNumber] = list->startPage;
+			listPages[coffno - FirstOffsetNumber] = list->startPage;
 		}
 
 		listInfo.blkno = blkno;
@@ -52,7 +54,7 @@ ivfflatbulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 
 		for (coffno = FirstOffsetNumber; coffno <= cmaxoffno; coffno = OffsetNumberNext(coffno))
 		{
-			BlockNumber searchPage = startPages[coffno - FirstOffsetNumber];
+			BlockNumber searchPage = listPages[coffno - FirstOffsetNumber];
 			BlockNumber insertPage = InvalidBlockNumber;
 
 			/* Iterate over entry pages */

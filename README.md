@@ -17,11 +17,11 @@ Plus [ACID](https://en.wikipedia.org/wiki/ACID) compliance, point-in-time recove
 
 ### Linux and Mac
 
-Compile and install the extension (supports Postgres 12+)
+Compile and install the extension (supports Postgres 13+)
 
 ```sh
 cd /tmp
-git clone --branch v0.7.4 https://github.com/pgvector/pgvector.git
+git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git
 cd pgvector
 make
 make install # may need sudo
@@ -46,7 +46,7 @@ Then use `nmake` to build:
 ```cmd
 set "PGROOT=C:\Program Files\PostgreSQL\16"
 cd %TEMP%
-git clone --branch v0.7.4 https://github.com/pgvector/pgvector.git
+git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git
 cd pgvector
 nmake /F Makefile.win
 nmake /F Makefile.win install
@@ -82,7 +82,7 @@ Get the nearest neighbors by L2 distance
 SELECT * FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
 ```
 
-Also supports inner product (`<#>`), cosine distance (`<=>`), and L1 distance (`<+>`, added in 0.7.0)
+Also supports inner product (`<#>`), cosine distance (`<=>`), and L1 distance (`<+>`)
 
 Note: `<#>` returns the negative inner product since Postgres only supports `ASC` order index scans on operators
 
@@ -100,13 +100,15 @@ Or add a vector column to an existing table
 ALTER TABLE items ADD COLUMN embedding vector(3);
 ```
 
+Also supports [half-precision](#half-precision-vectors), [binary](#binary-vectors), and [sparse](#sparse-vectors) vectors
+
 Insert vectors
 
 ```sql
 INSERT INTO items (embedding) VALUES ('[1,2,3]'), ('[4,5,6]');
 ```
 
-Or load vectors in bulk using `COPY` ([example](https://github.com/pgvector/pgvector-python/blob/master/examples/bulk_loading.py))
+Or load vectors in bulk using `COPY` ([example](https://github.com/pgvector/pgvector-python/blob/master/examples/loading/example.py))
 
 ```sql
 COPY items (embedding) FROM STDIN WITH (FORMAT BINARY);
@@ -144,7 +146,9 @@ Supported distance functions are:
 - `<->` - L2 distance
 - `<#>` - (negative) inner product
 - `<=>` - cosine distance
-- `<+>` - L1 distance (added in 0.7.0)
+- `<+>` - L1 distance
+- `<~>` - Hamming distance (binary vectors)
+- `<%>` - Jaccard distance (binary vectors)
 
 Get the nearest neighbors to a row
 
@@ -202,7 +206,7 @@ You can add an index to use approximate nearest neighbor search, which trades so
 
 Supported index types are:
 
-- [HNSW](#hnsw) - added in 0.5.0
+- [HNSW](#hnsw)
 - [IVFFlat](#ivfflat)
 
 ## HNSW
@@ -231,19 +235,19 @@ Cosine distance
 CREATE INDEX ON items USING hnsw (embedding vector_cosine_ops);
 ```
 
-L1 distance - added in 0.7.0
+L1 distance
 
 ```sql
 CREATE INDEX ON items USING hnsw (embedding vector_l1_ops);
 ```
 
-Hamming distance - added in 0.7.0
+Hamming distance
 
 ```sql
 CREATE INDEX ON items USING hnsw (embedding bit_hamming_ops);
 ```
 
-Jaccard distance - added in 0.7.0
+Jaccard distance
 
 ```sql
 CREATE INDEX ON items USING hnsw (embedding bit_jaccard_ops);
@@ -252,9 +256,9 @@ CREATE INDEX ON items USING hnsw (embedding bit_jaccard_ops);
 Supported types are:
 
 - `vector` - up to 2,000 dimensions
-- `halfvec` - up to 4,000 dimensions (added in 0.7.0)
-- `bit` - up to 64,000 dimensions (added in 0.7.0)
-- `sparsevec` - up to 1,000 non-zero elements (added in 0.7.0)
+- `halfvec` - up to 4,000 dimensions
+- `bit` - up to 64,000 dimensions
+- `sparsevec` - up to 1,000 non-zero elements
 
 ### Index Options
 
@@ -308,17 +312,19 @@ Note: Do not set `maintenance_work_mem` so high that it exhausts the memory on t
 
 Like other index types, it’s faster to create an index after loading your initial data
 
-Starting with 0.6.0, you can also speed up index creation by increasing the number of parallel workers (2 by default)
+You can also speed up index creation by increasing the number of parallel workers (2 by default)
 
 ```sql
 SET max_parallel_maintenance_workers = 7; -- plus leader
 ```
 
-For a large number of workers, you may also need to increase `max_parallel_workers` (8 by default)
+For a large number of workers, you may need to increase `max_parallel_workers` (8 by default)
+
+The [index options](#index-options) also have a significant impact on build time (use the defaults unless seeing low recall)
 
 ### Indexing Progress
 
-Check [indexing progress](https://www.postgresql.org/docs/current/progress-reporting.html#CREATE-INDEX-PROGRESS-REPORTING) with Postgres 12+
+Check [indexing progress](https://www.postgresql.org/docs/current/progress-reporting.html#CREATE-INDEX-PROGRESS-REPORTING)
 
 ```sql
 SELECT phase, round(100.0 * blocks_done / nullif(blocks_total, 0), 1) AS "%" FROM pg_stat_progress_create_index;
@@ -361,7 +367,7 @@ Cosine distance
 CREATE INDEX ON items USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 ```
 
-Hamming distance - added in 0.7.0
+Hamming distance
 
 ```sql
 CREATE INDEX ON items USING ivfflat (embedding bit_hamming_ops) WITH (lists = 100);
@@ -370,8 +376,8 @@ CREATE INDEX ON items USING ivfflat (embedding bit_hamming_ops) WITH (lists = 10
 Supported types are:
 
 - `vector` - up to 2,000 dimensions
-- `halfvec` - up to 4,000 dimensions (added in 0.7.0)
-- `bit` - up to 64,000 dimensions (added in 0.7.0)
+- `halfvec` - up to 4,000 dimensions
+- `bit` - up to 64,000 dimensions
 
 ### Query Options
 
@@ -404,7 +410,7 @@ For a large number of workers, you may also need to increase `max_parallel_worke
 
 ### Indexing Progress
 
-Check [indexing progress](https://www.postgresql.org/docs/current/progress-reporting.html#CREATE-INDEX-PROGRESS-REPORTING) with Postgres 12+
+Check [indexing progress](https://www.postgresql.org/docs/current/progress-reporting.html#CREATE-INDEX-PROGRESS-REPORTING)
 
 ```sql
 SELECT phase, round(100.0 * tuples_done / nullif(tuples_total, 0), 1) AS "%" FROM pg_stat_progress_create_index;
@@ -421,33 +427,127 @@ Note: `%` is only populated during the `loading tuples` phase
 
 ## Filtering
 
-There are a few ways to index nearest neighbor queries with a `WHERE` clause
+There are a few ways to index nearest neighbor queries with a `WHERE` clause.
 
 ```sql
 SELECT * FROM items WHERE category_id = 123 ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
 ```
 
-Create an index on one [or more](https://www.postgresql.org/docs/current/indexes-multicolumn.html) of the `WHERE` columns for exact search
+A good place to start is creating an index on the filter column. This can provide fast, exact nearest neighbor search in many cases. Postgres has a number of [index types](https://www.postgresql.org/docs/current/indexes-types.html) for this: B-tree (default), hash, GiST, SP-GiST, GIN, and BRIN.
 
 ```sql
 CREATE INDEX ON items (category_id);
 ```
 
-Or a [partial index](https://www.postgresql.org/docs/current/indexes-partial.html) on the vector column for approximate search
+For multiple columns, consider a [multicolumn index](https://www.postgresql.org/docs/current/indexes-multicolumn.html).
+
+```sql
+CREATE INDEX ON items (location_id, category_id);
+```
+
+Exact indexes work well for conditions that match a low percentage of rows. Otherwise, [approximate indexes](#indexing) can work better.
+
+```sql
+CREATE INDEX ON items USING hnsw (embedding vector_l2_ops);
+```
+
+With approximate indexes, filtering is applied *after* the index is scanned. If a condition matches 10% of rows, with HNSW and the default `hnsw.ef_search` of 40, only 4 rows will match on average. For more rows, increase `hnsw.ef_search`.
+
+```sql
+SET hnsw.ef_search = 200;
+```
+
+Starting with 0.8.0, you can enable [iterative index scans](#iterative-index-scans), which will automatically scan more of the index when needed.
+
+```sql
+SET hnsw.iterative_scan = strict_order;
+```
+
+If filtering by only a few distinct values, consider [partial indexing](https://www.postgresql.org/docs/current/indexes-partial.html).
 
 ```sql
 CREATE INDEX ON items USING hnsw (embedding vector_l2_ops) WHERE (category_id = 123);
 ```
 
-Use [partitioning](https://www.postgresql.org/docs/current/ddl-partitioning.html) for approximate search on many different values of the `WHERE` columns
+If filtering by many different values, consider [partitioning](https://www.postgresql.org/docs/current/ddl-partitioning.html).
 
 ```sql
 CREATE TABLE items (embedding vector(3), category_id int) PARTITION BY LIST(category_id);
 ```
 
-## Half-Precision Vectors
+## Iterative Index Scans
 
-*Added in 0.7.0*
+*Added in 0.8.0*
+
+With approximate indexes, queries with filtering can return less results since filtering is applied *after* the index is scanned. Starting with 0.8.0, you can enable iterative index scans, which will automatically scan more of the index until enough results are found (or it reaches `hnsw.max_scan_tuples` or `ivfflat.max_probes`).
+
+Iterative scans can use strict or relaxed ordering.
+
+Strict ensures results are in the exact order by distance
+
+```sql
+SET hnsw.iterative_scan = strict_order;
+```
+
+Relaxed allows results to be slightly out of order by distance, but provides better recall
+
+```sql
+SET hnsw.iterative_scan = relaxed_order;
+# or
+SET ivfflat.iterative_scan = relaxed_order;
+```
+
+With relaxed ordering, you can use a [materialized CTE](https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-CTE-MATERIALIZATION) to get strict ordering
+
+```sql
+WITH relaxed_results AS MATERIALIZED (
+    SELECT id, embedding <-> '[1,2,3]' AS distance FROM items WHERE category_id = 123 ORDER BY distance LIMIT 5
+) SELECT * FROM relaxed_results ORDER BY distance;
+```
+
+For queries that filter by distance, use a materialized CTE and place the distance filter outside of it for best performance (due to the [current behavior](https://www.postgresql.org/message-id/flat/CAOdR5yGUoMQ6j7M5hNUXrySzaqZVGf_Ne%2B8fwZMRKTFxU1nbJg%40mail.gmail.com) of the Postgres executor)
+
+```sql
+WITH nearest_results AS MATERIALIZED (
+    SELECT id, embedding <-> '[1,2,3]' AS distance FROM items ORDER BY distance LIMIT 5
+) SELECT * FROM nearest_results WHERE distance < 5 ORDER BY distance;
+```
+
+Note: Place any other filters inside the CTE
+
+### Iterative Scan Options
+
+Since scanning a large portion of an approximate index is expensive, there are options to control when a scan ends.
+
+#### HNSW
+
+Specify the max number of tuples to visit (20,000 by default)
+
+```sql
+SET hnsw.max_scan_tuples = 20000;
+```
+
+Note: This is approximate and does not affect the initial scan
+
+Specify the max amount of memory to use, as a multiple of `work_mem` (1 by default)
+
+```sql
+SET hnsw.scan_mem_multiplier = 2;
+```
+
+Note: Try increasing this if increasing `hnsw.max_scan_tuples` does not improve recall
+
+#### IVFFlat
+
+Specify the max number of probes
+
+```sql
+SET ivfflat.max_probes = 100;
+```
+
+Note: If this is lower than `ivfflat.probes`, `ivfflat.probes` will be used
+
+## Half-Precision Vectors
 
 Use the `halfvec` type to store half-precision vectors
 
@@ -456,8 +556,6 @@ CREATE TABLE items (id bigserial PRIMARY KEY, embedding halfvec(3));
 ```
 
 ## Half-Precision Indexing
-
-*Added in 0.7.0*
 
 Index vectors at half precision for smaller indexes
 
@@ -473,30 +571,22 @@ SELECT * FROM items ORDER BY embedding::halfvec(3) <-> '[1,2,3]' LIMIT 5;
 
 ## Binary Vectors
 
-Use the `bit` type to store binary vectors ([example](https://github.com/pgvector/pgvector-python/blob/master/examples/hash_image_search.py))
+Use the `bit` type to store binary vectors ([example](https://github.com/pgvector/pgvector-python/blob/master/examples/imagehash/example.py))
 
 ```sql
 CREATE TABLE items (id bigserial PRIMARY KEY, embedding bit(3));
 INSERT INTO items (embedding) VALUES ('000'), ('111');
 ```
 
-Get the nearest neighbors by Hamming distance (added in 0.7.0)
+Get the nearest neighbors by Hamming distance
 
 ```sql
 SELECT * FROM items ORDER BY embedding <~> '101' LIMIT 5;
 ```
 
-Or (before 0.7.0)
-
-```sql
-SELECT * FROM items ORDER BY bit_count(embedding # '101') LIMIT 5;
-```
-
 Also supports Jaccard distance (`<%>`)
 
 ## Binary Quantization
-
-*Added in 0.7.0*
 
 Use expression indexing for binary quantization
 
@@ -519,8 +609,6 @@ SELECT * FROM (
 ```
 
 ## Sparse Vectors
-
-*Added in 0.7.0*
 
 Use the `sparsevec` type to store sparse vectors
 
@@ -551,11 +639,9 @@ SELECT id, content FROM items, plainto_tsquery('hello search') query
     WHERE textsearch @@ query ORDER BY ts_rank_cd(textsearch, query) DESC LIMIT 5;
 ```
 
-You can use [Reciprocal Rank Fusion](https://github.com/pgvector/pgvector-python/blob/master/examples/hybrid_search_rrf.py) or a [cross-encoder](https://github.com/pgvector/pgvector-python/blob/master/examples/hybrid_search.py) to combine results.
+You can use [Reciprocal Rank Fusion](https://github.com/pgvector/pgvector-python/blob/master/examples/hybrid_search/rrf.py) or a [cross-encoder](https://github.com/pgvector/pgvector-python/blob/master/examples/hybrid_search/cross_encoder.py) to combine results.
 
 ## Indexing Subvectors
-
-*Added in 0.7.0*
 
 Use expression indexing to index subvectors
 
@@ -597,7 +683,7 @@ Be sure to restart Postgres for changes to take effect.
 
 ### Loading
 
-Use `COPY` for bulk loading data ([example](https://github.com/pgvector/pgvector-python/blob/master/examples/bulk_loading.py)).
+Use `COPY` for bulk loading data ([example](https://github.com/pgvector/pgvector-python/blob/master/examples/loading/example.py)).
 
 ```sql
 COPY items (embedding) FROM STDIN WITH (FORMAT BINARY);
@@ -687,7 +773,7 @@ Scale pgvector the same way you scale Postgres.
 
 Scale vertically by increasing memory, CPU, and storage on a single instance. Use existing tools to [tune parameters](#tuning) and [monitor performance](#monitoring).
 
-Scale horizontally with [replicas](https://www.postgresql.org/docs/current/hot-standby.html), or use [Citus](https://github.com/citusdata/citus) or another approach for sharding ([example](https://github.com/pgvector/pgvector-python/blob/master/examples/citus.py)).
+Scale horizontally with [replicas](https://www.postgresql.org/docs/current/hot-standby.html), or use [Citus](https://github.com/citusdata/citus) or another approach for sharding ([example](https://github.com/pgvector/pgvector-python/blob/master/examples/citus/example.py)).
 
 ## Languages
 
@@ -699,8 +785,12 @@ C | [pgvector-c](https://github.com/pgvector/pgvector-c)
 C++ | [pgvector-cpp](https://github.com/pgvector/pgvector-cpp)
 C#, F#, Visual Basic | [pgvector-dotnet](https://github.com/pgvector/pgvector-dotnet)
 Crystal | [pgvector-crystal](https://github.com/pgvector/pgvector-crystal)
+D | [pgvector-d](https://github.com/pgvector/pgvector-d)
 Dart | [pgvector-dart](https://github.com/pgvector/pgvector-dart)
 Elixir | [pgvector-elixir](https://github.com/pgvector/pgvector-elixir)
+Erlang | [pgvector-erlang](https://github.com/pgvector/pgvector-erlang)
+Fortran | [pgvector-fortran](https://github.com/pgvector/pgvector-fortran)
+Gleam | [pgvector-gleam](https://github.com/pgvector/pgvector-gleam)
 Go | [pgvector-go](https://github.com/pgvector/pgvector-go)
 Haskell | [pgvector-haskell](https://github.com/pgvector/pgvector-haskell)
 Java, Kotlin, Groovy, Scala | [pgvector-java](https://github.com/pgvector/pgvector-java)
@@ -714,6 +804,7 @@ Perl | [pgvector-perl](https://github.com/pgvector/pgvector-perl)
 PHP | [pgvector-php](https://github.com/pgvector/pgvector-php)
 Python | [pgvector-python](https://github.com/pgvector/pgvector-python)
 R | [pgvector-r](https://github.com/pgvector/pgvector-r)
+Raku | [pgvector-raku](https://github.com/pgvector/pgvector-raku)
 Ruby | [pgvector-ruby](https://github.com/pgvector/pgvector-ruby), [Neighbor](https://github.com/ankane/neighbor)
 Rust | [pgvector-rust](https://github.com/pgvector/pgvector-rust)
 Swift | [pgvector-swift](https://github.com/pgvector/pgvector-swift)
@@ -835,7 +926,7 @@ ALTER TABLE items ALTER COLUMN embedding SET STORAGE PLAIN;
 
 #### Why are there less results for a query after adding an HNSW index?
 
-Results are limited by the size of the dynamic candidate list (`hnsw.ef_search`). There may be even less results due to dead tuples or filtering conditions in the query. We recommend setting `hnsw.ef_search` to at least twice the `LIMIT` of the query. If you need more than 500 results, use an IVFFlat index instead.
+Results are limited by the size of the dynamic candidate list (`hnsw.ef_search`), which is 40 by default. There may be even less results due to dead tuples or filtering conditions in the query. Enabling [iterative index scans](#iterative-index-scans) can help address this.
 
 Also, note that `NULL` vectors are not indexed (as well as zero vectors for cosine distance).
 
@@ -847,7 +938,7 @@ The index was likely created with too little data for the number of lists. Drop 
 DROP INDEX index_name;
 ```
 
-Results can also be limited by the number of probes (`ivfflat.probes`).
+Results can also be limited by the number of probes (`ivfflat.probes`). Enabling [iterative index scans](#iterative-index-scans) can address this.
 
 Also, note that `NULL` vectors are not indexed (as well as zero vectors for cosine distance).
 
@@ -983,7 +1074,7 @@ l2_normalize(sparsevec) → sparsevec | Normalize with Euclidean norm | 0.7.0
 If your machine has multiple Postgres installations, specify the path to [pg_config](https://www.postgresql.org/docs/current/app-pgconfig.html) with:
 
 ```sh
-export PG_CONFIG=/Library/PostgreSQL/16/bin/pg_config
+export PG_CONFIG=/Library/PostgreSQL/17/bin/pg_config
 ```
 
 Then re-run the installation instructions (run `make clean` before `make` if needed). If `sudo` is needed for `make install`, use:
@@ -994,11 +1085,11 @@ sudo --preserve-env=PG_CONFIG make install
 
 A few common paths on Mac are:
 
-- EDB installer - `/Library/PostgreSQL/16/bin/pg_config`
-- Homebrew (arm64) - `/opt/homebrew/opt/postgresql@16/bin/pg_config`
-- Homebrew (x86-64) - `/usr/local/opt/postgresql@16/bin/pg_config`
+- EDB installer - `/Library/PostgreSQL/17/bin/pg_config`
+- Homebrew (arm64) - `/opt/homebrew/opt/postgresql@17/bin/pg_config`
+- Homebrew (x86-64) - `/usr/local/opt/postgresql@17/bin/pg_config`
 
-Note: Replace `16` with your Postgres server version
+Note: Replace `17` with your Postgres server version
 
 ### Missing Header
 
@@ -1007,14 +1098,20 @@ If compilation fails with `fatal error: postgres.h: No such file or directory`, 
 For Ubuntu and Debian, use:
 
 ```sh
-sudo apt install postgresql-server-dev-16
+sudo apt install postgresql-server-dev-17
 ```
 
-Note: Replace `16` with your Postgres server version
+Note: Replace `17` with your Postgres server version
 
 ### Missing SDK
 
-If compilation fails and the output includes `warning: no such sysroot directory` on Mac, reinstall Xcode Command Line Tools.
+If compilation fails and the output includes `warning: no such sysroot directory` on Mac, your Postgres installation points to a path that no longer exists.
+
+```sh
+pg_config --cppflags
+```
+
+Reinstall Postgres to fix this.
 
 ### Portability
 
@@ -1032,6 +1129,14 @@ make OPTFLAGS=""
 
 If compilation fails with `Cannot open include file: 'postgres.h': No such file or directory`, make sure `PGROOT` is correct.
 
+### Mismatched Architecture
+
+If compilation fails with `error C2196: case value '4' already used`, make sure `vcvars64.bat` was called. Then run `nmake /F Makefile.win clean` and re-run the installation instructions.
+
+### Missing Symbol
+
+If linking fails with `unresolved external symbol float_to_shortest_decimal_bufn` with Postgres 17.0-17.2, upgrade to Postgres 17.3+.
+
 ### Permissions
 
 If installation fails with `Access is denied`, re-run the installation instructions as an administrator.
@@ -1043,17 +1148,23 @@ If installation fails with `Access is denied`, re-run the installation instructi
 Get the [Docker image](https://hub.docker.com/r/pgvector/pgvector) with:
 
 ```sh
-docker pull pgvector/pgvector:pg16
+docker pull pgvector/pgvector:pg17
 ```
 
-This adds pgvector to the [Postgres image](https://hub.docker.com/_/postgres) (replace `16` with your Postgres server version, and run it the same way).
+This adds pgvector to the [Postgres image](https://hub.docker.com/_/postgres) (replace `17` with your Postgres server version, and run it the same way).
 
 You can also build the image manually:
 
 ```sh
-git clone --branch v0.7.4 https://github.com/pgvector/pgvector.git
+git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git
 cd pgvector
-docker build --pull --build-arg PG_MAJOR=16 -t myuser/pgvector .
+docker build --pull --build-arg PG_MAJOR=17 -t myuser/pgvector .
+```
+
+If you increase `maintenance_work_mem`, make sure `--shm-size` is at least that size to avoid an error with parallel HNSW index builds.
+
+```sh
+docker run --shm-size=1g ...
 ```
 
 ### Homebrew
@@ -1064,7 +1175,7 @@ With Homebrew Postgres, you can use:
 brew install pgvector
 ```
 
-Note: This only adds it to the `postgresql@14` formula
+Note: This only adds it to the `postgresql@17` and `postgresql@14` formulas
 
 ### PGXN
 
@@ -1079,29 +1190,29 @@ pgxn install vector
 Debian and Ubuntu packages are available from the [PostgreSQL APT Repository](https://wiki.postgresql.org/wiki/Apt). Follow the [setup instructions](https://wiki.postgresql.org/wiki/Apt#Quickstart) and run:
 
 ```sh
-sudo apt install postgresql-16-pgvector
+sudo apt install postgresql-17-pgvector
 ```
 
-Note: Replace `16` with your Postgres server version
+Note: Replace `17` with your Postgres server version
 
 ### Yum
 
 RPM packages are available from the [PostgreSQL Yum Repository](https://yum.postgresql.org/). Follow the [setup instructions](https://www.postgresql.org/download/linux/redhat/) for your distribution and run:
 
 ```sh
-sudo yum install pgvector_16
+sudo yum install pgvector_17
 # or
-sudo dnf install pgvector_16
+sudo dnf install pgvector_17
 ```
 
-Note: Replace `16` with your Postgres server version
+Note: Replace `17` with your Postgres server version
 
 ### pkg
 
 Install the FreeBSD package with:
 
 ```sh
-pkg install postgresql15-pgvector
+pkg install postgresql16-pgvector
 ```
 
 or the port with:
@@ -1141,36 +1252,6 @@ You can check the version in the current database with:
 
 ```sql
 SELECT extversion FROM pg_extension WHERE extname = 'vector';
-```
-
-## Upgrade Notes
-
-### 0.6.0
-
-#### Postgres 12
-
-If upgrading with Postgres 12, remove this line from `sql/vector--0.5.1--0.6.0.sql`:
-
-```sql
-ALTER TYPE vector SET (STORAGE = external);
-```
-
-Then run `make install` and `ALTER EXTENSION vector UPDATE;`.
-
-#### Docker
-
-The Docker image is now published in the `pgvector` org, and there are tags for each supported version of Postgres (rather than a `latest` tag).
-
-```sh
-docker pull pgvector/pgvector:pg16
-# or
-docker pull pgvector/pgvector:0.6.0-pg16
-```
-
-Also, if you’ve increased `maintenance_work_mem`, make sure `--shm-size` is at least that size to avoid an error with parallel HNSW index builds.
-
-```sh
-docker run --shm-size=1g ...
 ```
 
 ## Thanks

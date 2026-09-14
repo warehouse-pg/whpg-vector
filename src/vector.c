@@ -26,11 +26,6 @@
 #include "varatt.h"
 #endif
 
-#if PG_VERSION_NUM < 130000
-#define TYPALIGN_DOUBLE 'd'
-#define TYPALIGN_INT 'i'
-#endif
-
 #define STATE_DIMS(x) (ARR_DIMS(x)[0] - 1)
 #define CreateStateDatums(dim) palloc(sizeof(Datum) * (dim + 1))
 
@@ -159,24 +154,6 @@ CheckStateArray(ArrayType *statearray, const char *caller)
 		elog(ERROR, "%s: expected state array", caller);
 	return (float8 *) ARR_DATA_PTR(statearray);
 }
-
-#if PG_VERSION_NUM < 120003
-static pg_noinline void
-float_overflow_error(void)
-{
-	ereport(ERROR,
-			(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-			 errmsg("value out of range: overflow")));
-}
-
-static pg_noinline void
-float_underflow_error(void)
-{
-	ereport(ERROR,
-			(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-			 errmsg("value out of range: underflow")));
-}
-#endif
 
 /*
  * Convert textual representation to internal representation
