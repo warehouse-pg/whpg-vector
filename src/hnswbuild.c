@@ -1070,12 +1070,8 @@ ComputeParallelWorkers(Relation heap, Relation index)
 {
 	int			parallel_workers;
 
-#if PG_VERSION_NUM >= 120012
 	/* Make sure it's safe to use parallel workers */
 	parallel_workers = plan_create_index_workers(RelationGetRelid(heap), RelationGetRelid(index));
-#else
-	parallel_workers = 0;
-#endif
 	if (parallel_workers == 0)
 		return 0;
 
