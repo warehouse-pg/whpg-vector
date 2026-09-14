@@ -2,19 +2,24 @@
 
 #include <math.h>
 
+#include "access/genam.h"
 #include "access/generic_xlog.h"
-#include "catalog/pg_type.h"
-#include "catalog/pg_type_d.h"
 #include "common/hashfn.h"
 #include "fmgr.h"
 #include "hnsw.h"
 #include "lib/pairingheap.h"
+#include "nodes/pg_list.h"
+#include "port/atomics.h"
 #include "sparsevec.h"
 #include "storage/bufmgr.h"
 #include "utils/datum.h"
 #include "utils/memdebug.h"
 #include "utils/rel.h"
+#include "vector.h"
+
+#if PG_VERSION_NUM >= 160000
 #include "varatt.h"
+#endif
 
 #if PG_VERSION_NUM < 170000
 static inline uint64
@@ -213,7 +218,7 @@ void
 HnswInitNeighbors(char *base, HnswElement element, int m, HnswAllocator * allocator)
 {
 	int			level = element->level;
-	HnswNeighborArrayPtr *neighborList = (HnswNeighborArrayPtr *) HnswAlloc(allocator, sizeof(HnswNeighborArrayPtr) * (level + 1));
+	HnswNeighborArrayPtr *neighborList = (HnswNeighborArrayPtr *) HnswAlloc(allocator, mul_size(sizeof(HnswNeighborArrayPtr), add_size(level, 1)));
 
 	HnswPtrStore(base, element->neighbors, neighborList);
 
@@ -257,7 +262,7 @@ HnswInitElement(char *base, ItemPointer heaptid, int m, double ml, int maxLevel,
 
 	HnswInitNeighbors(base, element, m, allocator);
 
-	HnswPtrStore(base, element->value, (Pointer) NULL);
+	HnswPtrStore(base, element->value, (char *) NULL);
 
 	return element;
 }
@@ -277,13 +282,13 @@ HnswAddHeapTid(HnswElement element, ItemPointer heaptid)
 HnswElement
 HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno)
 {
-	HnswElement element = palloc(sizeof(HnswElementData));
+	HnswElement element = palloc_object(HnswElementData);
 	char	   *base = NULL;
 
 	element->blkno = blkno;
 	element->offno = offno;
 	HnswPtrStore(base, element->neighbors, (HnswNeighborArrayPtr *) NULL);
-	HnswPtrStore(base, element->value, (Pointer) NULL);
+	HnswPtrStore(base, element->value, (char *) NULL);
 	return element;
 }
 
@@ -509,7 +514,7 @@ HnswLoadElementFromTuple(HnswElement element, HnswElementTuple etup, bool loadHe
 		char	   *base = NULL;
 		Datum		value = datumCopy(PointerGetDatum(&etup->data), false, -1);
 
-		HnswPtrStore(base, element->value, DatumGetPointer(value));
+		HnswPtrStore(base, element->value, (char *) DatumGetPointer(value));
 	}
 }
 
@@ -540,6 +545,9 @@ HnswLoadElementImpl(BlockNumber blkno, OffsetNumber offno, double *distance, Hns
 	etup = (HnswElementTuple) PageGetItem(page, PageGetItemId(page, offno));
 
 	Assert(HnswIsElementTuple(etup));
+
+	if (unlikely(etup->deleted))
+		elog(ERROR, "cannot load deleted element");
 
 	/* Calculate distance */
 	if (distance != NULL)
@@ -588,7 +596,7 @@ GetElementDistance(char *base, HnswElement element, HnswQuery * q, HnswSupport *
 static HnswSearchCandidate *
 HnswInitSearchCandidate(char *base, HnswElement element, double distance)
 {
-	HnswSearchCandidate *sc = palloc(sizeof(HnswSearchCandidate));
+	HnswSearchCandidate *sc = palloc_object(HnswSearchCandidate);
 
 	HnswPtrStore(base, sc->element, element);
 	sc->distance = distance;
@@ -754,7 +762,7 @@ HnswLoadNeighborTids(HnswElement element, ItemPointerData *indextids, Relation i
 	Buffer		buf;
 	Page		page;
 	HnswNeighborTuple ntup;
-	int			start;
+	Size		start;
 
 	buf = ReadBuffer(index, element->neighborPage);
 	LockBuffer(buf, BUFFER_LOCK_SHARE);
@@ -773,8 +781,8 @@ HnswLoadNeighborTids(HnswElement element, ItemPointerData *indextids, Relation i
 	}
 
 	/* Copy to minimize lock time */
-	start = (element->level - lc) * m;
-	memcpy(indextids, ntup->indextids + start, lm * sizeof(ItemPointerData));
+	start = mul_size(element->level - lc, m);
+	memcpy(indextids, ntup->indextids + start, mul_size(sizeof(ItemPointerData), lm));
 
 	UnlockReleaseBuffer(buf);
 	return true;
@@ -823,7 +831,7 @@ HnswSearchLayer(char *base, HnswQuery * q, List *ep, int ef, int lc, Relation in
 	HnswNeighborArray *localNeighborhood = NULL;
 	Size		neighborhoodSize = 0;
 	int			lm = HnswGetLayerM(m, lc);
-	HnswUnvisited *unvisited = palloc(lm * sizeof(HnswUnvisited));
+	HnswUnvisited *unvisited = palloc_array_checked(HnswUnvisited, lm);
 	int			unvisitedLength;
 	bool		inMemory = index == NULL;
 
@@ -923,7 +931,7 @@ HnswSearchLayer(char *base, HnswQuery * q, List *ep, int ef, int lc, Relation in
 					continue;
 			}
 
-			if (eElement == NULL || !(eDistance < f->distance || alwaysAdd))
+			if (!(eDistance < f->distance || alwaysAdd))
 			{
 				if (discarded != NULL)
 				{
@@ -1066,7 +1074,7 @@ SelectNeighbors(char *base, List *c, int lm, HnswSupport * support, bool *closer
 	if (list_length(w) <= lm)
 		return w;
 
-	wd = palloc(sizeof(HnswCandidate *) * list_length(w));
+	wd = palloc_array_checked(HnswCandidate *, list_length(w));
 
 	/* Ensure order of candidates is deterministic for closer caching */
 	if (sortCandidates)
@@ -1320,7 +1328,7 @@ HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entryPoint
 		foreach(lc2, w)
 		{
 			HnswSearchCandidate *sc = lfirst(lc2);
-			HnswCandidate *hc = palloc(sizeof(HnswCandidate));
+			HnswCandidate *hc = palloc_object(HnswCandidate);
 
 			hc->element = sc->element;
 			hc->distance = sc->distance;

@@ -1,18 +1,25 @@
 #include "postgres.h"
 
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 
 #include "access/amapi.h"
+#include "access/genam.h"
 #include "access/reloptions.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
+#include "fmgr.h"
 #include "hnsw.h"
 #include "miscadmin.h"
+#include "nodes/pg_list.h"
+#include "storage/lwlock.h"
 #include "utils/float.h"
 #include "utils/guc.h"
+#include "utils/relcache.h"
 #include "utils/selfuncs.h"
 #include "utils/spccache.h"
+#include "vector.h"
 
 #if PG_VERSION_NUM < 150000
 #define MarkGUCPrefixReserved(x) EmitWarningsOnPlaceholders(x)
@@ -52,9 +59,20 @@ HnswInitLockTranche(void)
 								  sizeof(int) * 1,
 								  &found);
 	if (!found)
+	{
+#if PG_VERSION_NUM >= 190000
 		tranche_ids[0] = LWLockNewTrancheId("HnswBuild");
+#else
+		tranche_ids[0] = LWLockNewTrancheId();
+#endif
+	}
 	hnsw_lock_tranche_id = tranche_ids[0];
 	LWLockRelease(AddinShmemInitLock);
+
+#if PG_VERSION_NUM < 190000
+	/* Per-backend registration of the tranche ID */
+	LWLockRegisterTranche(hnsw_lock_tranche_id, "HnswBuild");
+#endif
 }
 
 /*
@@ -127,7 +145,7 @@ hnswcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 	Relation	index;
 
 	/* Never use index without order */
-	if (path->indexorderbys == NULL)
+	if (path->indexorderbys == NIL)
 	{
 		*indexStartupCost = get_float8_infinity();
 		*indexTotalCost = get_float8_infinity();
@@ -249,6 +267,64 @@ FUNCTION_PREFIX PG_FUNCTION_INFO_V1(hnswhandler);
 Datum
 hnswhandler(PG_FUNCTION_ARGS)
 {
+#if PG_VERSION_NUM >= 190000
+	static const IndexAmRoutine amroutine = {
+		.type = T_IndexAmRoutine,
+		.amstrategies = 0,
+		.amsupport = 3,
+		.amoptsprocnum = 0,
+		.amcanorder = false,
+		.amcanorderbyop = true,
+		.amcanhash = false,
+		.amconsistentequality = false,
+		.amconsistentordering = false,
+		.amcanbackward = false,
+		.amcanunique = false,
+		.amcanmulticol = false,
+		.amoptionalkey = true,
+		.amsearcharray = false,
+		.amsearchnulls = false,
+		.amstorage = false,
+		.amclusterable = false,
+		.ampredlocks = false,
+		.amcanparallel = false,
+		.amcanbuildparallel = true,
+		.amcaninclude = false,
+		.amusemaintenanceworkmem = false,
+		.amsummarizing = false,
+		.amparallelvacuumoptions = VACUUM_OPTION_PARALLEL_BULKDEL,
+		.amkeytype = InvalidOid,
+
+		.ambuild = hnswbuild,
+		.ambuildempty = hnswbuildempty,
+		.aminsert = hnswinsert,
+		.aminsertcleanup = NULL,
+		.ambulkdelete = hnswbulkdelete,
+		.amvacuumcleanup = hnswvacuumcleanup,
+		.amcanreturn = NULL,
+		.amcostestimate = hnswcostestimate,
+		.amgettreeheight = NULL,
+		.amoptions = hnswoptions,
+		.amproperty = NULL,
+		.ambuildphasename = hnswbuildphasename,
+		.amvalidate = hnswvalidate,
+		.amadjustmembers = NULL,
+		.ambeginscan = hnswbeginscan,
+		.amrescan = hnswrescan,
+		.amgettuple = hnswgettuple,
+		.amgetbitmap = NULL,
+		.amendscan = hnswendscan,
+		.ammarkpos = NULL,
+		.amrestrpos = NULL,
+		.amestimateparallelscan = NULL,
+		.aminitparallelscan = NULL,
+		.amparallelrescan = NULL,
+		.amtranslatestrategy = NULL,
+		.amtranslatecmptype = NULL,
+	};
+
+	PG_RETURN_POINTER(&amroutine);
+#else
 	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
 
 	amroutine->amstrategies = 0;
@@ -322,4 +398,5 @@ hnswhandler(PG_FUNCTION_ARGS)
 #endif
 
 	PG_RETURN_POINTER(amroutine);
+#endif
 }

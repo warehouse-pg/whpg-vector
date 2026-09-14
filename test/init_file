@@ -23,10 +23,10 @@ s/(slice\d+ [0-9.]+:\d+ pid=\d+)//
 
 # Remove file name and line number printed in error message
 # before compare expected with results
-m/ \(hnswbuild\.c:\d+\)/
-s/ \(hnswbuild\.c:\d+\)//
-m/ \(hnswutils\.c:\d+\)/
-s/ \(hnswutils\.c:\d+\)//
-m/ \(ivfbuild\.c:\d+\)/
-s/ \(ivfbuild\.c:\d+\)//
+# Match any source file, not a fixed list: upstream moves these ereports
+# between files (0.8.x added halfvec.c and vector.c, and the server itself
+# reports from e.g. pathnode.c), and a hardcoded list silently stops
+# matching when that happens.
+m/ \(\w+\.c:\d+\)/
+s/ \(\w+\.c:\d+\)//
 -- end_matchsubs

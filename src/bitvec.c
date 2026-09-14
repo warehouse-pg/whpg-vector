@@ -2,6 +2,7 @@
 
 #include "bitutils.h"
 #include "bitvec.h"
+#include "fmgr.h"
 #include "utils/varbit.h"
 #include "vector.h"
 
@@ -16,7 +17,7 @@ VarBit *
 InitBitVector(int dim)
 {
 	VarBit	   *result;
-	int			size;
+	Size		size;
 
 	size = VARBITTOTALLEN(dim);
 	result = (VarBit *) palloc0(size);

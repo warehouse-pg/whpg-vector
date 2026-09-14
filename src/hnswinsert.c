@@ -1,14 +1,19 @@
 #include "postgres.h"
 
-#include <math.h>
-
+#include "access/genam.h"
 #include "access/generic_xlog.h"
 #include "hnsw.h"
+#include "nodes/execnodes.h"
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
+#include "storage/lwlock.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
+#include "utils/rel.h"
+
+#if PG_VERSION_NUM >= 160000
 #include "varatt.h"
+#endif
 
 /*
  * Get the insert page
@@ -661,7 +666,7 @@ FindDuplicateOnDisk(Relation index, HnswElement element, bool building)
  * Update graph on disk
  */
 static void
-UpdateGraphOnDisk(Relation index, HnswSupport * support, HnswElement element, int m, int efConstruction, HnswElement entryPoint, bool building)
+UpdateGraphOnDisk(Relation index, HnswSupport * support, HnswElement element, int m, HnswElement entryPoint, bool building)
 {
 	BlockNumber newInsertPage = InvalidBlockNumber;
 
@@ -709,7 +714,7 @@ HnswInsertTupleOnDisk(Relation index, HnswSupport * support, Datum value, ItemPo
 
 	/* Create an element */
 	element = HnswInitElement(base, heaptid, m, HnswGetMl(m), HnswGetMaxLevel(m), NULL);
-	HnswPtrStore(base, element->value, DatumGetPointer(value));
+	HnswPtrStore(base, element->value, (char *) DatumGetPointer(value));
 
 	/* Prevent concurrent inserts when likely updating entry point */
 	if (entryPoint == NULL || element->level > entryPoint->level)
@@ -729,7 +734,7 @@ HnswInsertTupleOnDisk(Relation index, HnswSupport * support, Datum value, ItemPo
 	HnswFindElementNeighbors(base, element, entryPoint, index, support, m, efConstruction, false);
 
 	/* Update graph on disk */
-	UpdateGraphOnDisk(index, support, element, m, efConstruction, entryPoint, building);
+	UpdateGraphOnDisk(index, support, element, m, entryPoint, building);
 
 	/* Release lock */
 	UnlockPage(index, HNSW_UPDATE_LOCK, lockmode);

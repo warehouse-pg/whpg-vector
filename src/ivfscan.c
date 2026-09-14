@@ -2,15 +2,26 @@
 
 #include <float.h>
 
+#include "access/genam.h"
+#include "access/itup.h"
 #include "access/relscan.h"
+#include "access/tupdesc.h"
 #include "catalog/pg_operator_d.h"
 #include "catalog/pg_type_d.h"
+#include "fmgr.h"
 #include "lib/pairingheap.h"
 #include "ivfflat.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "utils/memutils.h"
+#include "utils/rel.h"
+#include "utils/snapmgr.h"
+#include "utils/tuplesort.h"
+
+#if PG_VERSION_NUM >= 160000
+#include "varatt.h"
+#endif
 
 #define GetScanList(ptr) pairingheap_container(IvfflatScanList, ph_node, ptr)
 #define GetScanListConst(ptr) pairingheap_const_container(IvfflatScanList, ph_node, ptr)
@@ -265,12 +276,13 @@ ivfflatbeginscan(Relation index, int nkeys, int norderbys)
 	if (maxProbes > lists)
 		maxProbes = lists;
 
-	so = (IvfflatScanOpaque) palloc(sizeof(IvfflatScanOpaqueData));
+	so = palloc_object(IvfflatScanOpaqueData);
 	so->typeInfo = IvfflatGetTypeInfo(index);
 	so->first = true;
 	so->probes = probes;
 	so->maxProbes = maxProbes;
 	so->dimensions = dimensions;
+	so->value = PointerGetDatum(NULL);
 
 	/* Set support functions */
 	so->procinfo = index_getprocinfo(index, 1, IVFFLAT_DISTANCE_PROC);
@@ -287,10 +299,9 @@ ivfflatbeginscan(Relation index, int nkeys, int norderbys)
 	so->tupdesc = CreateTemplateTupleDesc(2);
 	TupleDescInitEntry(so->tupdesc, (AttrNumber) 1, "distance", FLOAT8OID, -1, 0);
 	TupleDescInitEntry(so->tupdesc, (AttrNumber) 2, "heaptid", TIDOID, -1, 0);
-	/* Manually-built TupleDescs must be finalized before use as of PG19;
-	 * without it, firstNonCachedOffsetAttr/firstNonGuaranteedAttr are left
-	 * at their -1 sentinel and slot_deform_heap_tuple() segfaults */
+#if PG_VERSION_NUM >= 190000
 	TupleDescFinalize(so->tupdesc);
+#endif
 
 	/* Prep sort */
 	so->sortstate = InitScanSortState(so->tupdesc);
@@ -307,9 +318,9 @@ ivfflatbeginscan(Relation index, int nkeys, int norderbys)
 	so->bas = GetAccessStrategy(BAS_BULKREAD);
 
 	so->listQueue = pairingheap_allocate(CompareLists, scan);
-	so->listPages = palloc(maxProbes * sizeof(BlockNumber));
+	so->listPages = palloc_array_checked(BlockNumber, maxProbes);
 	so->listIndex = 0;
-	so->lists = palloc(maxProbes * sizeof(IvfflatScanList));
+	so->lists = palloc_array_checked(IvfflatScanList, maxProbes);
 
 	MemoryContextSwitchTo(oldCtx);
 
@@ -329,6 +340,12 @@ ivfflatrescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int
 	so->first = true;
 	pairingheap_reset(so->listQueue);
 	so->listIndex = 0;
+
+	if (so->normprocinfo != NULL && DatumGetPointer(so->value) != NULL)
+	{
+		pfree(DatumGetPointer(so->value));
+		so->value = PointerGetDatum(NULL);
+	}
 
 	if (keys && scan->numberOfKeys > 0)
 		memmove(scan->keyData, keys, scan->numberOfKeys * sizeof(ScanKeyData));
@@ -359,6 +376,10 @@ ivfflatgettuple(IndexScanDesc scan, ScanDirection dir)
 
 		/* Count index scan for stats */
 		pgstat_count_index_scan(scan->indexRelation);
+#if PG_VERSION_NUM >= 180000
+		if (scan->instrument)
+			scan->instrument->nsearches++;
+#endif
 
 		/* Safety check */
 		if (scan->orderByData == NULL)
