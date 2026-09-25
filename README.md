@@ -13,6 +13,10 @@ Plus [ACID](https://en.wikipedia.org/wiki/ACID) compliance, point-in-time recove
 
 [![Build Status](https://github.com/pgvector/pgvector/actions/workflows/build.yml/badge.svg)](https://github.com/pgvector/pgvector/actions)
 
+----------------------------------------------------------------------
+
+This repository is a fork of the open-source [pgvector](https://github.com/pgvector/pgvector) project, renamed to whpg-vector and maintained for WarehousePG.
+
 ## Installation
 
 ### Linux and Mac
