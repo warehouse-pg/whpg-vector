@@ -11,7 +11,7 @@ Store your vectors with the rest of your data. Supports:
 
 Plus [ACID](https://en.wikipedia.org/wiki/ACID) compliance, point-in-time recovery, JOINs, and all of the other [great features](https://www.postgresql.org/about/) of Postgres
 
-[![Build Status](https://github.com/pgvector/pgvector/actions/workflows/build.yml/badge.svg)](https://github.com/pgvector/pgvector/actions)
+[![Build Status](https://github.com/warehouse-pg/whpg-vector/actions/workflows/build.yml/badge.svg)](https://github.com/warehouse-pg/whpg-vector/actions)
 
 ----------------------------------------------------------------------
 
