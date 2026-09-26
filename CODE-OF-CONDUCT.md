@@ -57,7 +57,7 @@ further defined and clarified by project maintainers.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported by contacting the WarehousePG project team at
-security@warehousepg.org. All complaints will be reviewed and investigated and
+analytics-security@enterprisedb.org. All complaints will be reviewed and investigated and
 will result in a response that is deemed necessary and appropriate to the
 circumstances. The project team is obligated to maintain confidentiality with
 regard to the reporter of an incident.
