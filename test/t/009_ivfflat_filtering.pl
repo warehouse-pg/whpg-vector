@@ -103,8 +103,10 @@ $node->safe_psql("postgres", "CREATE INDEX attribute_idx ON tst (c);");
 $explain = $node->safe_psql("postgres", qq(
 	EXPLAIN ANALYZE SELECT i FROM tst WHERE c = $c ORDER BY v <-> '$query' LIMIT $limit;
 ));
-# TODO Use attribute index
-like($explain, qr/Index Scan using idx/);
+# WarehousePG's planner already does what the upstream TODO asks for: it
+# takes the attribute index and sorts the matching rows, as upstream's hnsw
+# test (017) expects, instead of walking the ivfflat index as PostgreSQL does.
+like($explain, qr/Bitmap Index Scan on attribute_idx/);
 
 # Test partial index
 $node->safe_psql("postgres", "CREATE INDEX partial_idx ON tst USING ivfflat (v vector_l2_ops) WITH (lists = 5) WHERE (c = $c);");
