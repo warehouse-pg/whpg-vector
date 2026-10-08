@@ -34,7 +34,7 @@ IvfflatInit(void)
 
 	DefineCustomIntVariable("ivfflat.probes", "Sets the number of probes",
 							"Valid range is 1..lists.", &ivfflat_probes,
-							IVFFLAT_DEFAULT_PROBES, IVFFLAT_MIN_LISTS, IVFFLAT_MAX_LISTS, PGC_USERSET, PGVECTOR_GUC_FLAGS, NULL, NULL, NULL);
+							IVFFLAT_DEFAULT_PROBES, IVFFLAT_MIN_LISTS, IVFFLAT_MAX_LISTS, PGC_USERSET, GUC_GPDB_NEED_SYNC, NULL, NULL, NULL);
 
 	MarkGUCPrefixReserved("ivfflat");
 }
