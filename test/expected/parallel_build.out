@@ -127,6 +127,99 @@ SELECT count(*) FROM (SELECT id FROM pb_big ORDER BY val <-> (SELECT val FROM pb
 (1 row)
 
 RESET enable_seqscan;
+-- A worker-only record type must be sent even if its typmod is below the
+-- last type sent by the leader on the same Motion connection.
+CREATE TABLE pb_gap (id int, val vector(3)) WITH (parallel_workers = 2) DISTRIBUTED BY (id);
+DO $$
+BEGIN
+    INSERT INTO pb_gap
+    SELECT g, ARRAY[g % 17, g % 19, g % 23]::vector
+    FROM generate_series(1, 6000 * (SELECT count(*)::int FROM gp_segment_configuration
+                                     WHERE role = 'p' AND content >= 0)) g;
+END
+$$;
+-- Excluding leader tuples lets a nonempty index prove that workers ran.
+CREATE FUNCTION pb_gap_pred(id int) RETURNS bool AS $$
+BEGIN
+    IF (SELECT backend_type FROM pg_stat_activity WHERE pid = pg_backend_pid()) = 'parallel worker' THEN
+        PERFORM ROW(id, id, id);
+        RETURN true;
+    END IF;
+    RETURN false;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
+CREATE FUNCTION pb_gap_record(id int) RETURNS record AS $$
+BEGIN
+    RETURN ROW(id, id, id);
+END;
+$$ LANGUAGE plpgsql;
+SET optimizer = off;
+SET max_parallel_maintenance_workers = 2;
+SET min_parallel_table_scan_size = 0;
+CREATE INDEX pb_gap_idx ON pb_gap USING hnsw (val vector_l2_ops) WHERE pb_gap_pred(id);
+SET enable_seqscan = off;
+SELECT count(*) > 0 AS workers_processed_rows
+FROM (SELECT id FROM pb_gap WHERE pb_gap_pred(id)
+      ORDER BY val <-> '[1,2,3]' LIMIT 1) s;
+ workers_processed_rows 
+------------------------
+ t
+(1 row)
+
+RESET enable_seqscan;
+-- A bare ROW in the second branch would be blessed during executor init,
+-- before the first send.  The function imports the worker's type lazily.
+-- The first branch must be a shape new to the session, so that it gets a
+-- typmod above the worker's and is sent before the worker's is imported.
+SELECT r FROM (
+    SELECT ROW(id, id::text) AS r FROM pb_gap WHERE id <= 6
+    UNION ALL
+    SELECT pb_gap_record(id) AS r FROM pb_gap WHERE id <= 6
+) s;
+    r    
+---------
+ (1,1)
+ (2,2)
+ (3,3)
+ (4,4)
+ (5,5)
+ (6,6)
+ (1,1,1)
+ (2,2,2)
+ (3,3,3)
+ (4,4,4)
+ (5,5,5)
+ (6,6,6)
+(12 rows)
+
+-- A fresh Motion connection must still send the complete record cache.
+SELECT r FROM (
+    SELECT ROW(id, id::text) AS r FROM pb_gap WHERE id <= 6
+    UNION ALL
+    SELECT pb_gap_record(id) AS r FROM pb_gap WHERE id <= 6
+) s;
+    r    
+---------
+ (1,1)
+ (2,2)
+ (3,3)
+ (4,4)
+ (5,5)
+ (6,6)
+ (1,1,1)
+ (2,2,2)
+ (3,3,3)
+ (4,4,4)
+ (5,5,5)
+ (6,6,6)
+(12 rows)
+
+RESET min_parallel_table_scan_size;
+RESET max_parallel_maintenance_workers;
+RESET optimizer;
+DROP TABLE pb_gap;
+DROP FUNCTION pb_gap_record(int);
+DROP FUNCTION pb_gap_pred(int);
 DROP FUNCTION pb_ingest(text);
 DROP TABLE pb_big;
 DROP TABLE pb_heap;
