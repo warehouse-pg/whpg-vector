@@ -146,6 +146,73 @@ DROP TABLE pb_gap;
 DROP FUNCTION pb_gap_record(int);
 DROP FUNCTION pb_gap_pred(int);
 
+-- A parallel worker that waits on a lock must report its leader's
+-- distributed xid in gp_dist_wait_status(), or the global deadlock
+-- detector drops the wait edge.  A second session builds the index while
+-- this one holds a lock that only the workers ask for.
+CREATE TABLE pb_gdd_lock (id int) DISTRIBUTED BY (id);
+CREATE TABLE pb_gdd (id int, val vector(3)) WITH (parallel_workers = 2) DISTRIBUTED BY (id);
+DO $$
+BEGIN
+    INSERT INTO pb_gdd
+    SELECT g, ARRAY[g % 17, g % 19, g % 23]::vector
+    FROM generate_series(1, 6000 * (SELECT count(*)::int FROM gp_segment_configuration
+                                     WHERE role = 'p' AND content >= 0)) g;
+END
+$$;
+
+-- Only the workers open pb_gdd_lock, so the leader never waits.
+-- pg_relation_size() just opens the relation, which is enough to wait.
+CREATE FUNCTION pb_gdd_pred(id int) RETURNS bool AS $$
+BEGIN
+    IF (SELECT backend_type FROM pg_stat_activity WHERE pid = pg_backend_pid()) = 'parallel worker' THEN
+        PERFORM pg_relation_size('pb_gdd_lock'::regclass);
+    END IF;
+    RETURN true;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
+
+BEGIN;
+LOCK TABLE pb_gdd_lock IN ACCESS EXCLUSIVE MODE;
+\setenv PGDATABASE :DBNAME
+\! psql -X -q -c "CREATE INDEX pb_gdd_idx ON pb_gdd USING hnsw (val vector_l2_ops) WHERE pb_gdd_pred(id)" > /dev/null 2>&1 &
+
+-- Wait until a worker of the other session blocks on this session's lock.
+DO $$
+BEGIN
+    FOR i IN 1..600 LOOP
+        EXIT WHEN EXISTS (SELECT 1 FROM gp_dist_wait_status()
+                          WHERE waiter_locktype = 'relation'
+                            AND holder_sessionid = current_setting('gp_session_id')::int);
+        PERFORM pg_sleep(0.1);
+    END LOOP;
+END
+$$;
+
+-- Every waiting worker reports the gxid of its own session, not 0.
+SELECT count(*) > 0 AS workers_wait,
+       coalesce(bool_and(w.waiter_dxid = x.distributed_xid::text::bigint), false) AS worker_xid_valid
+FROM gp_dist_wait_status() w
+LEFT JOIN gp_distributed_xacts x ON x.gp_session_id = w.waiter_sessionid
+WHERE w.waiter_locktype = 'relation'
+  AND w.holder_sessionid = current_setting('gp_session_id')::int;
+COMMIT;
+
+-- The build finishes once the lock is released.
+DO $$
+BEGIN
+    FOR i IN 1..600 LOOP
+        EXIT WHEN EXISTS (SELECT 1 FROM pg_class WHERE relname = 'pb_gdd_idx');
+        PERFORM pg_sleep(0.1);
+    END LOOP;
+END
+$$;
+SELECT indexname FROM pg_indexes WHERE tablename = 'pb_gdd';
+
+DROP TABLE pb_gdd;
+DROP TABLE pb_gdd_lock;
+DROP FUNCTION pb_gdd_pred(int);
+
 DROP FUNCTION pb_ingest(text);
 DROP TABLE pb_big;
 DROP TABLE pb_heap;
